@@ -1,0 +1,15 @@
+mxcp: 1
+
+projects:
+  salesforce-demo:
+    profiles:
+      dev:
+        secrets:
+          - name: salesforce
+            type: python
+            parameters:
+              instance_url: "${SALESFORCE_URL}"
+              username: "${SALESFORCE_USERNAME}"
+              password: "${SALESFORCE_PASSWORD}"
+              security_token: "${SALESFORCE_TOKEN}"
+              client_id: "${SALESFORCE_CLIENT_ID}"

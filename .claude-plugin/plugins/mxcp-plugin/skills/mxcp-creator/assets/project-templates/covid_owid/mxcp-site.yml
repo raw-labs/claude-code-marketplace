@@ -1,0 +1,5 @@
+mxcp: 1
+profile: default
+project: covid_owid
+sql_tools:
+  enabled: true

@@ -1,0 +1,5 @@
+mxcp: 1
+project: jira-demo
+profile: default
+secrets:
+  - jira

@@ -1,0 +1,13 @@
+{
+    "name": "claude-code-marketplace",
+    "owner": {
+        "name": "RAW Labs"
+    },
+    "plugins": [
+        {
+            "name": "mxcp-plugin",
+            "source": "./.claude-plugin/plugins/mxcp-plugin",
+            "description": "A Claude plugin for MXCP"
+        }
+    ]
+}

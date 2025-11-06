@@ -1,0 +1,42 @@
+mxcp: 1
+
+tool:
+  name: list_projects
+  description: |
+    Return a concise list of Jira projects.
+    Returns basic project information including key, name, type, and lead.
+  type: tool
+  annotations:
+    title: List Projects
+    readOnlyHint: true
+    destructiveHint: false
+    idempotentHint: true
+    openWorldHint: true
+  language: python
+  source:
+    file: ../python/jira_endpoints.py
+  parameters: []
+  return:
+    type: array
+    items:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The project key
+        name:
+          type: string
+          description: The project name
+        type:
+          type: string
+          description: The project type
+        lead:
+          type: string
+          description: The project lead
+        url:
+          type: string
+          description: The project URL
+  tests:
+    - name: "List all projects"
+      description: "Verify projects list returns array of projects"
+      arguments: []

@@ -1,0 +1,5 @@
+mxcp: 1
+project: salesforce-demo
+profile: dev
+secrets:
+  - salesforce

@@ -1,0 +1,27 @@
+mxcp: 1
+
+tool:
+  name: "describe_sobject"
+  description: "Use this tool to get detailed information about a specific Salesforce object's structure. This is crucial for understanding what fields are available, their types, and their properties. The tool returns comprehensive metadata including field types, picklist values, required fields, and field-level security settings. Use this before querying an object to ensure you're using valid field names and to understand the data types. For example, use this to discover all available fields on an Account or to find the valid values for a picklist field."
+  language: python
+  source:
+    file: ../python/salesforce_endpoints.py
+  parameters:
+    - name: sobject_name
+      type: string
+      description: "The API name of the Salesforce object to describe (e.g., 'Account', 'Contact', 'CustomObject__c'). The name is case-sensitive and must match exactly how it appears in Salesforce. You can use list_sobjects() to see all available object names."
+      examples:
+        - "Account"
+        - "Contact"
+        - "Opportunity"
+        - "CustomObject__c"
+  return:
+    type: object
+  annotations:
+    readOnlyHint: true
+  tests:
+    - name: "Describe Account object"
+      description: "Verify Account object description contains expected fields"
+      arguments:
+        - key: sobject_name
+          value: "Account"
