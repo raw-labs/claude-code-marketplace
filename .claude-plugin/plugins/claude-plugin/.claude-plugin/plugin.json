@@ -1,0 +1,8 @@
+{
+    "name": "anthropic-skills-plugin",
+    "description": "Plugin that exposes the anthropic skills",
+    "version": "1.0.0",
+    "author": {
+        "name": "Anthropic"
+    }
+}
