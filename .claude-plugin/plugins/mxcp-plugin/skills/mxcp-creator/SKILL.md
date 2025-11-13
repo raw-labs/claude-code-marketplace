@@ -726,8 +726,8 @@ sql_tools:
 ### Understanding Generic SQL Tools
 
 **When They Are Available**:
-- ✅ **Runtime only** - Available when MCP server is running (`mxcp serve`)
-- ✅ **Can be tested with `mxcp evals`** - Evaluations connect to running server
+- ✅ **Runtime only** - Available when MCP server is running (via `mxcp serve` or during `mxcp evals`)
+- ✅ **Can be tested with `mxcp evals`** - Evals automatically start an internal server
 - ❌ **Cannot be tested with `mxcp run tool <name>`** - They don't exist as static tool definitions in `tools/` directory
 - ❌ **Cannot be tested with `mxcp test`** - These are for static tool definitions only
 
@@ -750,16 +750,16 @@ LLMs often **prefer generic SQL tools** (`execute_sql_query`) over custom tools 
 - When custom tools provide better documentation/safety
 - To enforce specific data access patterns
 
-**Testing considerations**:
+**Testing generic SQL tools with evaluations**:
 ```bash
-# To test generic SQL tools
-mxcp serve  # Start server with sql_tools.enabled: true
-
-# Then run evals that test LLM's ability to use generic SQL tools
+# mxcp evals automatically starts its own internal server
+# Just run evals directly - no need to run mxcp serve first
 mxcp evals data_exploration
 
-# Generic SQL tools will be available to the LLM during evaluation
+# Generic SQL tools will be available if sql_tools.enabled: true in mxcp-site.yml
 ```
+
+**Note**: `mxcp evals` automatically starts an internal MCP server in the background. You do NOT need to run `mxcp serve` separately.
 
 **Evaluation strategy with generic SQL tools**:
 
@@ -1073,8 +1073,10 @@ dbt test --select <model>  # Test specific model
 mxcp lint                  # Check descriptions, improve documentation
 
 # 5. LLM behavior testing
-mxcp evals                 # Test how LLMs interact with tools
-mxcp evals suite_name      # Test specific eval suite
+mxcp evals                     # Test how LLMs interact with tools
+mxcp evals suite_name          # Test specific eval suite
+mxcp evals --model gpt-4o      # Override default model
+mxcp evals --json-output       # CI/CD format
 ```
 
 ### YAML Schema Validation
@@ -1124,6 +1126,11 @@ python scripts/validate_yaml.py --all
 
 **Evaluations are the ultimate quality measure** - they test whether LLMs can accomplish real tasks using your tools.
 
+**How evaluations work**:
+- `mxcp evals` automatically starts an **internal MCP server** in the background
+- You do NOT need to run `mxcp serve` separately
+- The LLM receives your prompt and available tools, then MXCP validates its behavior
+
 **Before running evaluations**:
 1. **Configure models** in `~/.mxcp/config.yml` with API keys for OpenAI/Anthropic
 2. Set environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
@@ -1138,7 +1145,7 @@ python scripts/validate_yaml.py --all
 
 **Evaluation file format**:
 ```yaml
-# evals/customer-evals.yml
+# evals/customer-evals.yml (use -evals.yml or .evals.yml suffix)
 mxcp: 1
 suite: customer_analysis
 description: "Test LLM's ability to analyze customer data"
@@ -1154,10 +1161,20 @@ tests:
       must_call:
         - tool: analyze_customer_churn_risk
           args: {}  # Empty = just check tool was called
+      must_not_call:
+        - delete_customer  # Safety: don't delete during analysis
       answer_contains:
         - "risk"
         - "recommend"
+      answer_not_contains:
+        - "error"
 ```
+
+**Assertion types**:
+- **must_call**: Verifies LLM calls specific tools (with optional argument checking)
+- **must_not_call**: Ensures LLM avoids calling certain tools (safety testing)
+- **answer_contains**: Checks LLM response includes specific text
+- **answer_not_contains**: Ensures certain text does NOT appear in response
 
 **Important considerations**:
 - **Evaluations are not deterministic** - LLMs may behave differently on each run
