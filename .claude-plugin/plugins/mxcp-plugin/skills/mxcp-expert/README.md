@@ -1,4 +1,4 @@
-# MXCP Creator Claude Skill
+# MXCP Expert Claude Skill
 
 A comprehensive Claude skill for working with MXCP (Enterprise MCP Framework) - enabling you to build production-ready MCP servers with SQL and Python endpoints, complete with security, audit trails, and policy enforcement.
 
@@ -15,15 +15,15 @@ This skill provides complete guidance for:
 
 ## Installation
 
-1. Download the `mxcp-creator.zip` file
+1. Download the `mxcp-expert.zip` file
 2. In Claude Desktop, go to Settings → Developer → Custom Skills
-3. Click "Add Skill" and upload the `mxcp-creator.zip` file
+3. Click "Add Skill" and upload the `mxcp-expert.zip` file
 4. The skill will be automatically available when working on MXCP projects
 
 ## Skill Structure
 
 ```
-mxcp-creator/
+mxcp-expert/
 ├── SKILL.md                                # Main skill file with quick reference
 ├── assets/                                 # Project templates and resources
 │   ├── project-templates/                  # Pre-built MXCP projects
@@ -84,7 +84,7 @@ Claude will automatically use this skill when you:
 ```
 User: "I need to connect my chat to a CSV file with customer data"
 
-Claude: [Uses mxcp-creator skill]
+Claude: [Uses mxcp-expert skill]
 I'll help you create an MXCP server that queries your CSV file.
 
 1. Initialize project:
@@ -116,7 +116,7 @@ I'll help you create an MXCP server that queries your CSV file.
 ```
 User: "Connect to Google Calendar API"
 
-Claude: [Uses mxcp-creator skill]
+Claude: [Uses mxcp-expert skill]
 I'll use the google-calendar project template for OAuth integration.
 
 1. Copy template:
@@ -138,7 +138,7 @@ I'll use the google-calendar project template for OAuth integration.
 ```
 User: "Connect to my PostgreSQL production database"
 
-Claude: [Uses mxcp-creator skill]
+Claude: [Uses mxcp-expert skill]
 I'll help you connect to your PostgreSQL database using DuckDB ATTACH.
 
 1. Create project and config:

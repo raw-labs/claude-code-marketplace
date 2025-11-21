@@ -1,2 +1,2 @@
 - When updating the skills in the plugin, always use the skill-creator skill, except for the packaging part.
-- If any information about mxcp is needed, there is a list of documentation urls in .claude-plugin/plugins/mxcp-plugin/skills/mxcp-creator/llms.txt , you can research the web for clarifications.
+- If any information about mxcp is needed, there is a list of documentation urls in .claude-plugin/plugins/mxcp-plugin/skills/mxcp-expert/llms.txt , you can research the web for clarifications.

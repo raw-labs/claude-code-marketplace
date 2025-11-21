@@ -161,7 +161,7 @@ class YAMLValidator:
 
 
 def main():
-    # Determine base directory (assume script is in mxcp-creator/scripts/)
+    # Determine base directory (assume script is in mxcp-expert/scripts/)
     script_dir = Path(__file__).parent
     base_dir = script_dir.parent
     schemas_dir = base_dir / "assets" / "schemas"
