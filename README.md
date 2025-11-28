@@ -50,40 +50,60 @@ Update plugin:
 /plugin update mxcp-plugin
 ```
 
-## Using MXCP Plugin
+## Usage Example - Excel Files
 
-The `mxcp-plugin` plugin helps you build Model Context Protocol (MCP) servers for databases, APIs, and data files.
+The `mxcp-plugin` helps you build Model Context Protocol (MCP) servers. Here's a real workflow for turning Excel data into a queryable MXCP server.
 
-### Example Prompts
+### Step 1: Build Context About the Excel File
 
-**Database Integration:**
-```
-Create an MXCP server for my PostgreSQL database at localhost:5432
-```
+Before asking Claude to build anything, it needs to understand what's in your Excel file. You have two approaches:
 
-**API Wrapper:**
-```
-Build an MXCP server that wraps the my API, you can find the api specification in the my-api.json file
-```
+**Describe it yourself** if you already know the structure - explain what sheets exist, what columns they have, and what the data represents.
 
-**CSV/Excel Data:**
+**Ask Claude to read it** if you want Claude to figure it out:
 ```
-I have customer_data.csv in the current directory. Create an MXCP server 
-to query and analyze this data
+Read the Excel file at ./data/report.xlsx and tell me what it contains.
 ```
 
-**Custom Data Pipeline:**
+**The problem with messy Excel files:** Many real-world Excel files are completely unstructured - merged cells scattered chaotically, inconsistent layouts, data in unexpected places. When Claude reads these programmatically, it struggles because the underlying libraries put values in the first cell of a merged range while the rest appear empty. The structure that's visually obvious to a human becomes a confusing mess of sparse data.
+
+**The solution - use screenshots:** Since Claude is multimodal, you can provide a screenshot of the Excel file. This lets Claude see the visual layout the same way you do, making it much easier to understand files with complex formatting, merged cells, or unconventional structures.
+
+### Step 2: Specify What You Want Built
+
+Once Claude understands the data, tell it to create an MXCP server. The key steps are:
+
+1. **Ingest the Excel data into DuckDB first** - this is essential before the server can query anything
+
+2. **Choose an ingestion approach:**
+   - **Python models**: Claude writes Python code that reads the Excel and loads it into DuckDB directly
+   - **CSV + dbt seeds**: Claude first converts the Excel to CSV files, then uses dbt to seed them into DuckDB - this approach gives you dbt's transformation capabilities
+
+3. **Provide example questions and answers** that you want the server to handle. These examples help Claude understand the analytical capabilities you need. Importantly, tell Claude to make the implementations generic - you don't just want it to answer your specific example questions, you want it to handle any question of that type.
+
+Example prompt:
 ```
-Create an MXCP server that:
-1. Ingests sales.xlsx
-2. Connects to my MySQL database
-3. Provides tools to compare the data sources
+Create an MXCP server based on this Excel file. First ingest the data into
+DuckDB using dbt seeds.
+
+The server should answer questions like:
+- What were total sales by region? (Answer: aggregated revenue grouped by region)
+- Which products sell best? (Answer: products ranked by units sold)
+- How do sales trend over time? (Answer: time series of sales metrics)
+
+Make these generic so any similar analytical question works, not just these
+exact queries.
 ```
 
-**REST API to MCP:**
-```
-Build an MXCP server for the Stripe API with payment and subscription tools
-```
+### Step 3: Stay Engaged During Implementation
+
+The plugin already instructs Claude to validate the server, write tests for both dbt and MXCP, and follow best practices. But the process is interactive - watch what Claude does and intervene when needed.
+
+Claude will make assumptions about your data and requirements. Some will be wrong, especially things you didn't explicitly specify. When you see Claude heading in a direction you don't want, interrupt and correct it. This back-and-forth is normal and produces better results than trying to specify everything upfront.
+
+Any additional context you provide during the process helps - the more Claude understands about your actual use case, the better the final server will be.
+
+**Note:** These three steps can be combined into a single prompt. If you know your data well and have clear requirements, provide everything at once - the context about the Excel file, the MXCP server request with ingestion approach, and the example questions. Claude will work through it all in one go.
 
 ## Claude Code Best Practices
 
