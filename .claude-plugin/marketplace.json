@@ -8,11 +8,6 @@
             "name": "mxcp-plugin",
             "source": "./.claude-plugin/plugins/mxcp-plugin",
             "description": "An Anthropic plugin for MXCP"
-        },
-        {
-            "name": "anthropic-plugin",
-            "source": "./.claude-plugin/plugins/anthropic-plugin",
-            "description": "Plugin that exposes the anthropic skills"
         }
     ]
 }
