@@ -30,7 +30,7 @@ irm https://claude.ai/install.ps1 | iex
 ## MXCP Expert Plugin
 
 ```bash
-/plugin install mxcp-expert@raw-labs-claude-marketplace
+/plugin install mxcp-plugin@raw-labs-claude-marketplace
 ```
 
 Or use interactive mode:
@@ -139,7 +139,7 @@ Update marketplace:
 
 Update plugin:
 ```bash
-/plugin update mxcp-expert@raw-labs-claude-marketplace
+/plugin update mxcp-plugin@raw-labs-claude-marketplace
 ```
 
 ## Resources

@@ -6,7 +6,7 @@
     "plugins": [
         {
             "name": "mxcp-plugin",
-            "source": "./.claude-plugin/plugins/mxcp-plugin",
+            "source": "./.claude-plugin/plugins/mxcp-expert",
             "description": "An Anthropic plugin for MXCP"
         }
     ]
