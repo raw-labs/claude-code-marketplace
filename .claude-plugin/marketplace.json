@@ -5,9 +5,9 @@
     },
     "plugins": [
         {
-            "name": "mxcp-plugin",
+            "name": "mxcp-expert",
             "source": "./.claude-plugin/plugins/mxcp-expert",
-            "description": "An Anthropic plugin for MXCP",
+            "description": "A Claude plugin for MXCP",
             "skills": [
                 "./skills/mxcp-expert"
             ]
