@@ -3,6 +3,11 @@
     "description": "A Claude plugin for MXCP",
     "version": "1.0.0",
     "author": {
-        "name": "RAW Labs"
-    }
+        "name": "RAW Labs",
+        "url": "https://www.raw-labs.com/"
+    },
+    "homepage": "https://mxcp.dev",
+    "repository": "https://github.com/raw-labs/raw-labs-claude-marketplace",
+    "license": "MIT",
+    "keywords": ["mxcp", "mcp", "model-context-protocol", "enterprise", "sql", "python"]
 }

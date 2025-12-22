@@ -1,6 +1,6 @@
 ---
 name: mxcp-expert
-description: This skill must be used with any prompt that uses MXCP. MXCP is an enterprise-grade MCP (Model Context Protocol) framework for building production AI applications with SQL and Python endpoints, security, audit trails, policy enforcement, and comprehensive testing. Use this skill when working with MXCP in any capacity including creating, building, initializing, setting up, or editing MXCP servers or projects, configuring MCP tools/resources/prompts, implementing endpoints, setting up authentication/policies, debugging validation errors, or troubleshooting MXCP applications.
+description: Expert guidance for building production MCP servers using MXCP (Model Context Protocol eXtension Platform), an enterprise framework with SQL and Python endpoints, security, testing, and deployment. Use when: (1) Creating or initializing MXCP projects or MCP servers, (2) Building MCP tools, resources, or prompts, (3) Configuring endpoints, authentication, or policies, (4) Testing, validating, or debugging MXCP applications, or any task involving MXCP or MCP server development.
 ---
 
 # MXCP Expert Skill
