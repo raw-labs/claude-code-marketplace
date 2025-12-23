@@ -92,6 +92,126 @@ source:
   file: ../sql/query.sql
 ```
 
+## 7. Using `required: false` for Optional Parameters
+
+MXCP uses `default` to make parameters optional, NOT `required: false`:
+
+```yaml
+# WRONG - required field doesn't exist
+parameters:
+  - name: limit
+    type: integer
+    required: false
+
+# CORRECT - use default to make optional
+parameters:
+  - name: limit
+    type: integer
+    description: Max results to return
+    default: 10
+```
+
+## 8. Missing `language: python` for Python Tools
+
+Python tools MUST specify `language: python`:
+
+```yaml
+# WRONG - treated as SQL
+tool:
+  name: process_data
+  source:
+    file: ../python/process.py
+
+# CORRECT
+tool:
+  name: process_data
+  language: python
+  source:
+    file: ../python/process.py
+```
+
+## 9. Enum with Null Default
+
+If `default: null`, the enum MUST include `null`:
+
+```yaml
+# WRONG - null not in enum
+parameters:
+  - name: status
+    type: string
+    enum: ["active", "inactive"]
+    default: null
+
+# CORRECT - either include null in enum
+parameters:
+  - name: status
+    type: string
+    enum: ["active", "inactive", null]
+    default: null
+
+# OR - remove default if null not allowed
+parameters:
+  - name: status
+    type: string
+    enum: ["active", "inactive"]
+```
+
+## 10. Invalid Test Assertions
+
+Only these test assertions exist:
+
+```yaml
+# VALID assertions
+tests:
+  - name: test_user
+    arguments: [{key: id, value: 1}]
+    result: {"id": 1, "name": "Alice"}        # Exact match
+    result_contains: {id: 1}                   # Partial match
+    result_not_contains: ["password", "ssn"]   # Fields must NOT exist
+    result_contains_item: {status: "active"}   # Array contains item
+    result_contains_all: [{id: 1}, {id: 2}]    # Array contains all
+    result_length: 5                           # Array length
+    result_contains_text: "success"            # String contains
+
+# WRONG - these don't exist
+    expect_error: true           # NOT VALID
+    result_count: 5              # NOT VALID (use result_length)
+    result_count_min: 1          # NOT VALID
+    result_matches: "pattern"    # NOT VALID
+```
+
+## 11. Type Mismatch with SQL Aggregates
+
+DuckDB aggregate functions return floats. Cast to integer if needed:
+
+```sql
+-- WRONG - SUM returns float but declared as integer
+SELECT SUM(quantity) as total FROM orders
+
+-- CORRECT - cast to match declared type
+SELECT CAST(SUM(quantity) AS INTEGER) as total FROM orders
+SELECT CAST(COALESCE(SUM(quantity), 0) AS INTEGER) as total FROM orders
+```
+
+## 12. Custom Authentication Instead of Built-in
+
+NEVER build custom auth. MXCP has built-in OAuth:
+
+```yaml
+# WRONG - custom API key table
+tool:
+  name: authenticate_user
+  source:
+    code: SELECT * FROM api_keys WHERE key = $api_key
+
+# CORRECT - use built-in OAuth in ~/.mxcp/config.yml
+# Then use policies for authorization
+policies:
+  input:
+    - condition: "user.role != 'admin'"
+      action: deny
+```
+
 ## Quick Reference
 
 | Mistake | Fix |
@@ -103,3 +223,9 @@ source:
 | `format: datetime` | Use `format: date-time` |
 | `name: user-name` | Use `name: user_name` (no hyphens) |
 | Both `code:` and `file:` | Use only one |
+| `required: false` | Use `default: value` for optional params |
+| Missing `language: python` | Add for Python tools |
+| `default: null` with enum | Include `null` in enum list |
+| `expect_error`, `result_count` | Use valid assertions only |
+| `SUM()` returns float | Cast: `CAST(SUM(x) AS INTEGER)` |
+| Custom API key auth | Use built-in OAuth + policies |

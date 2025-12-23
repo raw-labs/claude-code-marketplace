@@ -5,7 +5,24 @@ description: Expert guidance for building production MCP servers using MXCP (Mod
 
 # MXCP Expert Skill
 
-MXCP (Model Context Protocol eXtension Platform) is an enterprise-grade framework for building production-ready AI tools with SQL and Python.
+MXCP is an enterprise framework for building production-ready AI tools with SQL and Python.
+
+## MXCP Mindset
+
+**Internalize these before implementing anything:**
+
+1. **MXCP is opinionated** - There's ONE right way to do most things. Don't invent patterns.
+2. **If it's common, MXCP provides it** - Auth, testing, data access, policies. Check before building.
+3. **Schema docs are truth** - When unsure about syntax, read the schema doc. Don't guess.
+4. **Validate constantly** - Run `mxcp validate` after every file change. Errors compound.
+5. **Read before writing** - 2 minutes reading docs saves 20 minutes debugging.
+
+## Pre-Implementation Checklist
+
+Before writing ANY YAML or code:
+- [ ] Read the relevant schema doc ([tool.md](references/schemas/tool.md), [resource.md](references/schemas/resource.md), or [prompt.md](references/schemas/prompt.md))
+- [ ] Check if MXCP already provides this feature (see Capabilities table)
+- [ ] Know the required fields and valid types
 
 ## MXCP Capabilities
 
@@ -32,38 +49,17 @@ MXCP (Model Context Protocol eXtension Platform) is an enterprise-grade framewor
 | **Reference** | [cli](references/reference/cli.md), [sql](references/reference/sql.md), [python](references/reference/python.md), [type-system](references/concepts/type-system.md) |
 | **Integrations** | [dbt](references/integrations/dbt.md), [duckdb](references/integrations/duckdb.md), [excel](references/integrations/excel-integration.md) |
 
-## Core Principles
+## Quick Reference: What Docs to Read
 
-**This skill prioritizes:**
-
-1. **Use Built-in Features First** - ALWAYS use MXCP's built-in capabilities before writing custom code. If unsure, check the documentation first
-2. **Use uv for environments** - Always create venv with `uv venv` and activate before running mxcp
-3. **Security First** - Use parameterized queries, validate inputs, implement authentication and policies
-4. **Validation Always** - Run `mxcp validate` after every change, fix errors immediately
-5. **Test Everything** - Write tests for all endpoints, run `mxcp test` before proceeding
-6. **Quality Checks** - Use `mxcp lint` to improve LLM understanding of tools
-7. **Incremental Development** - Build one tool at a time, validate before adding the next
-
-**NEVER implement these manually - MXCP provides them. Read the linked docs before implementing:**
-
-| Category | WRONG (custom code) | RIGHT (built-in) | Docs |
-|----------|---------------------|------------------|------|
-| **Authentication** | API keys, token validation, login endpoints | OAuth in config, `get_username()` in SQL | [authentication.md](references/security/authentication.md) |
-| **Authorization** | Python if/else role checks, permission tables | CEL policies in YAML (`user.role`, `user.email`) | [policies.md](references/security/policies.md) |
-| **External API auth** | Store/manage tokens, refresh logic | `get_user_external_token()` in SQL | [authentication.md](references/security/authentication.md) |
-| **Database setup** | Create DuckDB manually, custom path | Auto-created at `data/db-default.duckdb` | [configuration.md](references/operations/configuration.md) |
-| **Data ingestion** | Python scripts to load CSV/Excel | dbt seeds, Python models, DuckDB `read_*` | [dbt.md](references/integrations/dbt.md) |
-| **File reading** | Python open/pandas in tools | `read_csv_auto()`, `read_parquet()` | [duckdb.md](references/integrations/duckdb.md) |
-| **HTTP requests** | - | SQL: `read_json_auto()` for simple fetches; Python endpoint for complex API logic | [duckdb.md](references/integrations/duckdb.md), [python-endpoints.md](references/tutorials/python-endpoints.md) |
-| **Testing** | Custom pytest for endpoints | `mxcp test` with YAML tests | [testing.md](references/quality/testing.md) |
-| **Audit logging** | Custom logging code | Built-in `mxcp log` | [auditing.md](references/security/auditing.md) |
-| **Configuration** | Custom config files, hardcoded values | Profiles, `${ENV_VARS}` | [configuration.md](references/operations/configuration.md) |
-
-**Environment setup (required before any mxcp command):**
-```bash
-uv venv && source .venv/bin/activate
-uv pip install mxcp
-```
+| When implementing... | Read first |
+|---------------------|------------|
+| Tools, Resources, Prompts | [tool.md](references/schemas/tool.md), [resource.md](references/schemas/resource.md), [prompt.md](references/schemas/prompt.md) |
+| Authentication/Authorization | [authentication.md](references/security/authentication.md), [policies.md](references/security/policies.md) |
+| Tests | [testing.md](references/quality/testing.md) |
+| Data access (files, DBs) | [duckdb.md](references/integrations/duckdb.md) |
+| Data transformation | [dbt.md](references/integrations/dbt.md) |
+| Python endpoints | [python.md](references/reference/python.md) |
+| SQL endpoints | [sql.md](references/reference/sql.md) |
 
 ## Implementation Methodology
 
@@ -272,17 +268,12 @@ profile: default
 
 ## Common Mistakes
 
-**These cause validation errors.** See [common-mistakes.md](references/common-mistakes.md) for detailed examples.
+**Root cause of most errors: implementing without reading docs first.**
 
-| Mistake | Fix |
-|---------|-----|
-| Missing `tool:` wrapper | Add `tool:` before name/description |
-| Missing parameter description | Add `description:` to every parameter |
-| `type: int` | Use `type: integer` |
-| `type: map` | Use `type: object` |
-| `format: datetime` | Use `format: date-time` |
-| `name: user-name` | Use `name: user_name` (no hyphens) |
-| Both `code:` and `file:` | Use only one |
+Before implementing, always:
+1. Read the relevant schema doc ([tool.md](references/schemas/tool.md), [resource.md](references/schemas/resource.md), [prompt.md](references/schemas/prompt.md))
+2. Check [common-mistakes.md](references/common-mistakes.md) for known pitfalls
+3. Run `mxcp validate` after every change
 
 **Valid types:** `string`, `number`, `integer`, `boolean`, `array`, `object`
 
@@ -307,71 +298,43 @@ mxcp-project/
 - SQL files in `sql/`, referenced via relative paths
 - Python files in `python/`, referenced via relative paths
 
-## SQL vs Python Tools
+## Golden Path: Complete Tool Example
 
-**Use SQL for:**
-- Database queries
-- Data aggregations
-- Simple transformations
-
-**Use Python for:**
-- Complex business logic
-- External API calls
-- ML model inference
-- File processing
-
-### SQL Tool Example
+**This shows a complete, correct tool with all required fields and tests:**
 
 ```yaml
+# tools/get_customer.yml
 mxcp: 1
 tool:
-  name: get_user
-  description: Get user by ID
+  name: get_customer
+  description: Get customer by ID. Returns customer profile with contact info.
   parameters:
-    - name: user_id
+    - name: customer_id
       type: integer
-      description: User ID
+      description: The customer's unique identifier
   return:
     type: object
+    properties:
+      id: {type: integer}
+      name: {type: string}
+      email: {type: string}
   source:
-    code: |
-      SELECT id, name, email
-      FROM users
-      WHERE id = $user_id
+    file: ../sql/get_customer.sql
+  tests:
+    - name: existing_customer
+      arguments: [{key: customer_id, value: 1}]
+      result_contains: {id: 1}
+    - name: not_found
+      arguments: [{key: customer_id, value: 99999}]
+      result: null
 ```
 
-### Python Tool Example
-
-```yaml
-mxcp: 1
-tool:
-  name: analyze_data
-  description: Analyze data with Python
-  language: python
-  parameters:
-    - name: dataset
-      type: string
-      description: Dataset name
-  return:
-    type: object
-  source:
-    file: ../python/analysis.py
+```sql
+-- sql/get_customer.sql
+SELECT id, name, email FROM customers WHERE id = $customer_id
 ```
 
-```python
-# python/analysis.py
-from mxcp.runtime import db
-
-def analyze_data(dataset: str) -> dict:
-    # Use validated table names or query specific tables
-    allowed_tables = {"users", "orders", "products"}
-    if dataset not in allowed_tables:
-        return {"error": f"Unknown dataset: {dataset}"}
-
-    # Table names can't be parameterized - use validated string
-    results = db.execute(f"SELECT * FROM {dataset}")
-    return {"count": len(results), "data": results}
-```
+**SQL vs Python:** Use SQL for queries/aggregations. Use Python (`language: python`) for complex logic, APIs, ML.
 
 ## Security Features
 
