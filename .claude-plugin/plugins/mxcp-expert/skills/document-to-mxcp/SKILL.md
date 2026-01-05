@@ -18,6 +18,20 @@ Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes co
 - docx skill (Anthropic) for Word reading
 - mxcp-expert skill for MXCP server creation
 
+## Environment Requirements
+
+**Always use `uv` for package management and run in a virtual environment.**
+
+```bash
+# Create and activate venv (if not exists)
+uv venv && source .venv/bin/activate
+
+# Required packages
+uv pip install mxcp pandas openpyxl python-docx duckdb
+```
+
+**Never install packages globally. Always verify venv is active before running commands.**
+
 ## Core Principles
 
 1. **Analyze first, ingest second.** Fully understand the file before writing anything.
@@ -35,7 +49,7 @@ Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes co
 ```bash
 mkdir my-project && cd my-project
 uv venv && source .venv/bin/activate
-uv pip install mxcp
+uv pip install mxcp pandas openpyxl python-docx duckdb
 mxcp init --bootstrap
 ```
 
@@ -50,6 +64,13 @@ model-paths: ["models"]
 
 #### Existing project:
 ```bash
+# Ensure venv is active
+source .venv/bin/activate
+
+# Verify/install dependencies
+uv pip install mxcp pandas openpyxl python-docx duckdb
+
+# Discover current state
 ls models/*.py models/*.sql 2>/dev/null     # Existing dbt models
 cat models/schema.yml                         # Table schemas, relationships
 ls tools/*.yml 2>/dev/null                    # Existing tools
