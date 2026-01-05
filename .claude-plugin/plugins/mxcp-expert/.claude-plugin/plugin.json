@@ -9,5 +9,6 @@
     "homepage": "https://mxcp.dev",
     "repository": "https://github.com/raw-labs/raw-labs-claude-marketplace",
     "license": "MIT",
-    "keywords": ["mxcp", "mcp", "model-context-protocol", "enterprise", "sql", "python"]
+    "keywords": ["mxcp", "mcp", "model-context-protocol", "enterprise", "sql", "python"],
+    "skills": "./skills"
 }

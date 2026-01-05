@@ -7,11 +7,7 @@
         {
             "name": "mxcp-expert",
             "source": "./.claude-plugin/plugins/mxcp-expert",
-            "description": "A Claude plugin for MXCP",
-            "skills": [
-                "./skills/mxcp-expert",
-                "./skills/excel-to-mxcp"
-            ]
+            "description": "A Claude plugin for MXCP"
         }
     ]
 }
