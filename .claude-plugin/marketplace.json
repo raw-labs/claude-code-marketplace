@@ -6,7 +6,7 @@
     "plugins": [
         {
             "name": "mxcp-expert",
-            "source": "./.claude-plugin/plugins/mxcp-expert",
+            "source": "./plugins/mxcp-expert",
             "description": "A Claude plugin for MXCP"
         }
     ]
