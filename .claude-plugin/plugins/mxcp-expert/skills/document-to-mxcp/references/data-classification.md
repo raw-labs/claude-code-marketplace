@@ -36,11 +36,7 @@
 
 **Destination:** txt files for RAG
 
-**Chunking:**
-1. Identify section breaks (headings, blank lines)
-2. Keep paragraphs together
-3. Add context header + DB links to each chunk
-4. Target 500-1000 words per chunk
+**Chunking:** See SKILL.md "Unstructured Data → RAG txt" section for chunk sizing based on content type (small/medium/large).
 
 ## Semi-structured Data
 

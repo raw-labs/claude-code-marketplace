@@ -131,14 +131,19 @@ for para in doc.paragraphs:
         if para.text.strip():
             current_chunk.append(para.text)
 
-# Write chunks to RAG files
+# Write chunks to RAG files (see SKILL.md for full format)
 os.makedirs('rag_content', exist_ok=True)
 for i, chunk in enumerate(chunks):
     with open(f'rag_content/chunk_{i:03d}.txt', 'w') as f:
         f.write(f"=== SOURCE METADATA ===\n")
+        f.write(f"File: large_report.docx\n")
         f.write(f"Section: {chunk['section']}\n\n")
+        f.write(f"=== DATABASE LINKS ===\n")
+        f.write(f"Table: none\nIDs: []\nLink Type: none\n\n")
         f.write(f"=== CONTENT ===\n")
-        f.write(chunk['content'])
+        f.write(chunk['content'] + "\n\n")
+        f.write(f"=== KEYWORDS ===\n")
+        f.write(f"[extract keywords from content]\n")
     print(f"Wrote chunk {i}: {chunk['section']}")
 ```
 

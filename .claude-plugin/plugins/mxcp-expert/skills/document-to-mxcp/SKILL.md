@@ -12,11 +12,17 @@ Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes co
 - **Excel:** .xlsx, .xls, .csv
 - **Word:** .docx (for .doc files, convert to .docx first using LibreOffice or similar)
 
-## Prerequisites
+## Required Skills
 
-- xlsx skill (Anthropic) for Excel reading
-- docx skill (Anthropic) for Word reading
-- mxcp-expert skill for MXCP server creation
+**Invoke these skills as needed during execution:**
+
+| Skill | When to Use |
+|-------|-------------|
+| **xlsx** | Reading/analyzing Excel files (.xlsx, .xls, .csv) |
+| **docx** | Reading/analyzing Word documents (.docx) |
+| **mxcp-expert** | Creating MXCP project, tools, dbt models, validation |
+
+**Always use the appropriate skill** - don't try to implement Excel/Word parsing or MXCP operations from scratch.
 
 ## Environment Requirements
 
@@ -31,6 +37,10 @@ uv pip install mxcp pandas openpyxl python-docx duckdb
 ```
 
 **Never install packages globally. Always verify venv is active before running commands.**
+
+## Database
+
+**Always use the default database: `data/db-default.duckdb`** - created automatically by MXCP if not specified. Never create custom database names.
 
 ## Core Principles
 
@@ -213,46 +223,13 @@ Detect FK columns by:
 
 #### 2.3 RAG-DB Link Detection
 
-**How to detect links between text and database entities:**
+**Detection methods (in priority order):**
+1. **Explicit IDs:** Regex for "Customer 101", "Order #12345", "ID: ABC-123"
+2. **Entity names:** Match known names from DB against text
+3. **Section context:** Heading "Customer Analysis" + table "customers" → link
+4. **Semantic similarity:** Use embeddings only when explicit matching fails
 
-1. **Explicit ID mentions:**
-   ```python
-   import re
-   # Find patterns like "Customer 101", "Order #12345", "ID: ABC-123"
-   id_patterns = [
-       r'(?:customer|order|product|id)[:\s#]*(\d+)',
-       r'(?:id|code)[:\s]*([A-Z0-9-]+)',
-   ]
-   for pattern in id_patterns:
-       matches = re.findall(pattern, text, re.IGNORECASE)
-   ```
-
-2. **Entity name matching:**
-   ```python
-   # Get known entity names from DB
-   known_customers = df['name'].tolist()
-   # Check if any appear in text
-   for name in known_customers:
-       if name.lower() in text.lower():
-           # Link found
-   ```
-
-3. **Section-based linking:**
-   - If section heading is "Customer Analysis" and table is "customers" → link
-   - If paragraph follows a table → likely describes that table
-
-4. **Semantic similarity (if needed):**
-   - Compare embeddings of text with entity descriptions
-   - Use only when explicit matching fails
-
-**Link types:**
-
-| Type | Meaning | Example |
-|------|---------|---------|
-| `describes` | Text explains/describes the entity | "Customer 101 is a long-term partner..." |
-| `summarizes` | Text aggregates data from entities | "Total sales across all customers..." |
-| `references` | Text mentions but doesn't describe | "See order #123 for details" |
-| `contextualizes` | Text provides background | "Market conditions affecting Q4 sales" |
+**Link types:** `describes` (explains entity), `summarizes` (aggregates), `references` (mentions), `contextualizes` (background)
 
 **When no clear link exists:** Don't force it. Many RAG chunks are standalone.
 
@@ -272,22 +249,28 @@ For each NEW structured table:
 
 #### Code Extraction Path
 
-For clean, consistent content - write Python code to extract directly:
+For clean, consistent content - write Python dbt models to extract:
 
 ```python
-# Extract all tables at once
+# models/load_report_tables.py
+import pandas as pd
 from docx import Document
-import duckdb
 
-doc = Document('report.docx')
-conn = duckdb.connect('data/db-default.duckdb')
+def model(dbt, session):
+    doc = Document('source_data/report.docx')
 
-for i, table in enumerate(doc.tables):
+    # Extract first well-structured table
+    table = doc.tables[0]
     headers = [c.text.strip() for c in table.rows[0].cells]
     data = [[c.text.strip() for c in r.cells] for r in table.rows[1:]]
+
     df = pd.DataFrame(data, columns=headers)
-    conn.execute(f"CREATE TABLE table_{i} AS SELECT * FROM df")
+    df.columns = df.columns.str.lower().str.replace(' ', '_')
+    df['_rag_refs'] = None  # Populated later
+    return df
 ```
+
+**Always use dbt models** - they provide schema validation, testing, and lineage tracking.
 
 #### Manual Extraction Path
 
@@ -307,17 +290,48 @@ Create `models/load_{source}_{sheet_or_table}.py`:
 - Add `_rag_refs` column for bidirectional linking
 - For Word tables: use `doc.tables[index]`, extract headers from first row
 
-#### Update schema.yml
+#### Update schema.yml (REQUIRED)
 
-Add model with tests (not_null, unique on PK) and `_rag_refs` column description.
+**Every model MUST have dbt tests.** See [testing.md](references/testing.md) for complete format.
+
+Minimum tests per model:
+- `not_null` + `unique` on primary key
+- `not_null` on required fields
+- `relationships` on foreign keys
+- `accepted_values` on categorical columns
 
 #### Unstructured Data → RAG txt
 
-Format with sections: SOURCE METADATA, DATABASE LINKS (table, IDs, link type), CONTENT, KEYWORDS.
+**Choose chunk size based on content type and retrieval needs:**
+
+| Content Type | Chunk Size | Rationale |
+|--------------|------------|-----------|
+| Individual records with notes | **Small** (1-3 paragraphs) | Each record is self-contained, precise retrieval |
+| FAQ, definitions, discrete facts | **Small** | Stand-alone answers, high precision |
+| Topic sections, analysis | **Medium** (full section) | Context needed to understand meaning |
+| Tables with surrounding description | **Medium** | Table + context form semantic unit |
+| Narrative reports, policies | **Large** (multi-section) | Meaning requires broader context |
+| Legal text, contracts | **Large** | Clauses depend on surrounding text |
+
+**Decision process:**
+1. Can this content answer a question without surrounding text? → Small chunk
+2. Does meaning depend on nearby paragraphs? → Include them (medium)
+3. Is this part of a flowing narrative or argument? → Large chunk, don't split mid-thought
+
+**Never create chunks that:**
+- Split a sentence or paragraph mid-way
+- Separate a table from its description/headers
+- Break a logical argument or explanation
+
+**RAG txt file format:** See [rag-format.md](references/rag-format.md) for complete format with examples.
+
+Required sections: SOURCE METADATA, DATABASE LINKS, CONTENT, KEYWORDS.
 
 #### Update manifest.json
 
-Add `db_to_rag_index` mapping `{table}.{id}` → `[chunk_ids]` for reverse lookups.
+See [rag-format.md](references/rag-format.md#manifestjson-structure) for full structure.
+
+Key fields: `chunks` (chunk metadata), `db_to_rag_index` (reverse lookup `{table}.{id}` → chunk IDs).
 
 #### Populate DB-side References
 
@@ -374,10 +388,27 @@ for chunk_file in os.listdir('rag_content'):
 Each tool must be:
 1. **Self-documenting** - LLM understands without extra context
 2. **Well-parametrized** - Clear names, types, descriptions, examples
-3. **Focused** - One tool = one question type
-4. **Predictable** - Same inputs → same outputs
+3. **Categorical values documented** - Enum values listed in description and schema
+4. **Focused** - One tool = one question type
+5. **Predictable** - Same inputs → same outputs
 
-#### 5.2 Tool Categories
+#### 5.2 Categorical Data Handling
+
+**Detect categorical columns** (≤20 unique values, string type). For each:
+
+1. Extract unique values: `df[col].dropna().unique().tolist()`
+2. Add `enum` to parameter schema: `enum: ["active", "inactive", "pending"]`
+3. List valid values in description: `"Status options: active, inactive, pending"`
+
+```yaml
+parameters:
+  - name: status
+    type: string
+    description: "Customer status. Valid values: active, inactive, pending"
+    enum: ["active", "inactive", "pending"]
+```
+
+#### 5.3 Tool Categories
 
 | Question Type | Pattern | Example |
 |--------------|---------|---------|
@@ -386,55 +417,36 @@ Each tool must be:
 | Search | `search_{entities}` | `search_orders` |
 | **RAG lookup** | `get_{entity}_docs` | `get_customer_docs` |
 
-#### 5.3 RAG-DB Cross-Reference Tools
+#### 5.4 MXCP Tool Tests (REQUIRED)
 
-```yaml
-mxcp: 1
-tool:
-  name: get_customer_docs
-  description: |
-    Get RAG document chunks related to a customer.
-    Returns chunk IDs containing notes, descriptions, or analysis about this customer.
-    Use when asked for context, notes, or documentation about a customer.
-  parameters:
-    - name: customer_id
-      type: integer
-      required: true
-  return:
-    type: object
-    properties:
-      customer_id: {type: integer}
-      rag_chunks: {type: array, items: {type: string}}
-  source:
-    file: ../sql/get_customer_docs.sql
-  tests:
-    - name: customer_with_docs
-      arguments: [{key: customer_id, value: 101}]
-      result:
-        customer_id: 101
-        rag_chunks: ["chunk_001", "chunk_003"]
-```
+**Every tool MUST include tests.** See [testing.md](references/testing.md) for complete format and examples.
 
-### Phase 6: Validation & Reconciliation
+Before writing each tool:
+1. Query source data to compute expected result
+2. Add test cases matching pre-computed values
+3. Include edge cases (empty, single, multiple results)
+
+**Test values must match source data exactly.** If test fails, investigate - never just adjust expected value.
+
+### Phase 6: Run All Tests (REQUIRED)
+
+**Both dbt and mxcp tests MUST pass before completion.**
 
 ```bash
-mxcp validate && mxcp lint && mxcp test
+mxcp dbt run && mxcp dbt test  # Schema constraints
+mxcp validate && mxcp test      # Tool behavior
 ```
 
-**If tests fail, investigate systematically:**
-1. Re-verify calculation from source
-2. Check data in DuckDB
-3. Verify RAG-DB links in manifest.json
-4. Fix root cause
+**If tests fail:** See [testing.md](references/testing.md#debugging-test-failures) for debugging guide. Never just change expected values - fix root cause.
 
 ### Phase 7: Summary
 
 Document:
 - File processed, classification decisions
-- Tables created/extended
+- Tables created with dbt test results (pass/fail)
 - RAG chunks created with link counts
-- Tools created with test status
-- Any user decisions made
+- Tools created with mxcp test results (pass/fail)
+- All tests must show PASS before declaring completion
 
 ## Output Structure
 
