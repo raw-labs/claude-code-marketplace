@@ -1,55 +1,95 @@
 # Data Classification Guide
 
 ## Table of Contents
-- [Structured Data](#structured-data)
-- [Unstructured Data](#unstructured-data)
-- [Semi-structured Data](#semi-structured-data)
+- [Key Decision: Will Queries Be Needed?](#key-decision)
+- [Database Only](#database-only)
+- [RAG Only](#rag-only)
+- [Both Database and RAG](#both-database-and-rag)
+- [Converting Tables to RAG Text](#converting-tables-to-rag-text)
 - [Classification Algorithm](#classification-algorithm)
 - [Document Patterns](#merged-cell-patterns-excel)
 
-## Structured Data
+## Key Decision
+
+**The question is NOT "is this tabular?" but "will queries be needed on this data?"**
+
+Tabular data with descriptive text columns is often better suited for RAG (semantic search) than for database queries. Only put data in the database if aggregations, filtering, or lookups will be performed.
+
+## Database Only
+
+**When to use:** Data will be queried (SUM, COUNT, GROUP BY, filtering, lookups)
 
 **Indicators:**
-- Regular grid/table pattern
-- Clear header row with column names
-- Typed data (numbers, dates, short text <100 chars)
-- Consistent data in each column
+- Numeric columns for aggregation (amounts, counts, scores)
+- Date columns for time-based queries
+- ID columns for lookups and joins
+- Categorical columns for filtering
 
-**Sources:**
-- Excel sheets with tabular data
-- Word document tables with typed data
-- CSV files
+**Examples:**
+- Sales transactions (query: "total sales by month")
+- Inventory levels (query: "items below threshold")
+- Customer IDs with metrics (query: "top 10 customers by revenue")
 
 **Destination:** dbt Python model → DuckDB table
 
-## Unstructured Data
+## RAG Only
+
+**When to use:** Data is for semantic search/context retrieval, not queries
 
 **Indicators:**
-- Long text blocks (>200 chars average)
-- Narrative content (paragraphs, sentences)
-- No clear columnar structure
+- Descriptive text columns (notes, analysis, comments)
+- Narrative content explaining entities
+- Context that helps answer "tell me about X" questions
 
-**Sources:**
-- Excel sheets with notes/descriptions
-- Word document paragraphs
-- Text-heavy sections
+**Examples:**
+- Customer notes ("High-value partner, expanded in Q3")
+- Product descriptions
+- Meeting summaries
+- Analysis paragraphs
 
-**Destination:** txt files for RAG
+**Destination:** txt files for RAG (convert tables to narrative text)
 
-**Chunking:** See SKILL.md "Unstructured Data → RAG txt" section for chunk sizing based on content type (small/medium/large).
+**Chunking:** See SKILL.md "Unstructured Data → RAG txt" section for chunk sizing.
 
-## Semi-structured Data
+## Both Database and RAG
+
+**When to use:** Data needs BOTH queries AND semantic search
 
 **Indicators:**
-- Mix of tables and text
-- Tables with long text cells
-- Form-like structure
+- Numeric data for aggregation PLUS descriptive text for context
+- Users will ask "what are total sales?" AND "tell me about this customer"
 
-**Sources:**
-- Word documents with embedded tables + narrative
-- Excel with mixed data/notes columns
+**Examples:**
+- Customer table with revenue (queryable) AND notes (searchable)
+- Project list with budgets (queryable) AND descriptions (searchable)
 
-**Destination:** Hybrid - tables → DuckDB, text → RAG, with bidirectional links
+**Destination:**
+1. Numeric/queryable columns → DuckDB table
+2. Descriptive columns → RAG text files
+3. Bidirectional links between them
+
+## Converting Tables to RAG Text
+
+When tabular data has text columns better suited for RAG, convert rows to narrative format:
+
+**Original table:**
+| ID | Name | Description |
+|----|------|-------------|
+| 101 | Acme Corp | High-value partner, expanded operations in Q3. Key contact: John Smith. |
+| 102 | Beta Inc | New customer, pilot program started. Interested in enterprise tier. |
+
+**Converted to RAG text:**
+```
+Customer 101 (Acme Corp): High-value partner, expanded operations in Q3. Key contact: John Smith.
+
+Customer 102 (Beta Inc): New customer, pilot program started. Interested in enterprise tier.
+```
+
+**Conversion guidelines:**
+- Include ID/name for reference
+- Preserve the descriptive content
+- One entity per paragraph or grouped logically
+- Add section context if relevant
 
 ## Classification Algorithm
 

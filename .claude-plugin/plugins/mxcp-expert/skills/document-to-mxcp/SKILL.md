@@ -1,11 +1,11 @@
 ---
 name: document-to-mxcp
-description: "Intelligent single-file document ingestion into MXCP servers. Supports Excel (.xlsx, .xls, .csv) and Word (.docx) files. Performs deep analysis to classify content as structured (DuckDB/dbt) or unstructured (RAG txt), including table extraction from Word documents. Creates bidirectional references between RAG content and database entries. Use when: (1) Ingesting a document into an MXCP project, (2) Adding a new data file to an existing MXCP server, (3) Processing documents with mixed tables and text, (4) Preparing data for RAG systems with database linkage."
+description: "Intelligent single-file document ingestion into MXCP servers. Supports Excel (.xlsx, .xls, .csv) and Word (.docx) files. Analyzes content to determine if queries will be needed (DuckDB) or semantic search (RAG txt), including converting tabular text to narrative format. Creates bidirectional references between RAG content and database entries. Use when: (1) Ingesting a document into an MXCP project, (2) Adding a new data file to an existing MXCP server, (3) Processing documents with mixed tables and text, (4) Preparing data for RAG systems with database linkage."
 ---
 
 # Document to MXCP Ingestion
 
-Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes content thoroughly before ingestion, routes data to DuckDB (structured) or RAG txt (unstructured), with bidirectional references.
+Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes content to determine: will queries be needed (→ DuckDB) or semantic search (→ RAG txt)? Supports bidirectional references.
 
 ## Supported Formats
 
@@ -164,20 +164,28 @@ for i, table in enumerate(doc.tables):
 
 **For each content block, classify and decide destination.**
 
-#### 1.4 Classification
+#### 1.4 Classification: Database vs RAG vs Both
 
-See [data-classification.md](references/data-classification.md):
+**The key question is NOT "is this tabular?" but "will queries be needed?"**
 
-| Content | Classification | Destination |
-|---------|---------------|-------------|
-| Tables with typed data | **Structured** | DuckDB via dbt |
-| Paragraphs, narrative text | **Unstructured** | txt for RAG |
-| Tables with long text cells | **Semi-structured** | Evaluate per column |
+| Content | Will queries be needed? | Destination |
+|---------|------------------------|-------------|
+| Tables with numbers/dates for aggregation | Yes → **Database** | DuckDB for SUM, COUNT, filtering |
+| Tables with descriptive text columns | No → **RAG** | Convert to narrative text |
+| Tables that need both query AND search | Both → **Database + RAG** | Store in DB, also generate RAG text |
+| Paragraphs, narrative text | No → **RAG** | txt for semantic search |
+
+**Decision process:**
+1. **Database only:** Data will be queried (totals, filters, lookups by ID)
+2. **RAG only:** Data is for semantic search/context (descriptions, notes, analysis)
+3. **Both:** Need queries AND semantic search on same data
+
+**Converting tables to RAG:** See [data-classification.md](references/data-classification.md#converting-tables-to-rag-text) for conversion examples.
 
 **When to ask user:**
-- Classification confidence < 70%
-- Mixed content with no clear dominant type
-- Unusual document structure
+- Unclear if queries will be needed on this data
+- Table has mixed numeric + text columns
+- Same data might need both approaches
 
 #### 1.5 Extraction Strategy Decision
 
@@ -192,14 +200,14 @@ See [data-classification.md](references/data-classification.md):
 
 **For large documents (>50 pages):** Process section-by-section. See [extraction-strategy.md](references/extraction-strategy.md).
 
-**Code extraction:** Write Python to extract and write directly to DB/RAG files.
+**Code extraction:** Write Python dbt models to extract and load data programmatically.
 **Manual extraction:** Agent reads content, understands it, decides what to extract, writes results.
 
 **Document extraction strategy per section before proceeding.**
 
 ### Phase 2: Integration Analysis
 
-Skip if project is empty or file has only unstructured data.
+Skip if project is empty or file has only RAG content (no database tables).
 
 #### 2.1 Primary Key Detection
 
@@ -282,7 +290,7 @@ For complex content - agent reads, understands, and extracts step-by-step:
 4. Write to DB/RAG with proper metadata
 5. Track progress, move to next section
 
-#### Structured Data → dbt Models
+#### Queryable Data → dbt Models
 
 Create `models/load_{source}_{sheet_or_table}.py`:
 - Read from `source_data/{filename}` (copy source files there first)
@@ -377,7 +385,7 @@ expected_chunks = []
 for chunk_file in os.listdir('rag_content'):
     if chunk_file.endswith('.txt'):
         content = open(f'rag_content/{chunk_file}').read()
-        if 'customer 101' in content.lower() or 'Referenced IDs: [101' in content:
+        if 'customer 101' in content.lower() or 'IDs: [101' in content:
             expected_chunks.append(chunk_file.replace('.txt', ''))
 ```
 
@@ -475,7 +483,7 @@ project/
 
 | Situation | Action |
 |-----------|--------|
-| Classification confidence < 70% | Ask: "Is this table data or narrative text?" |
+| Unclear if queries needed | Ask: "Will you need to run queries on this data, or just search it?" |
 | Re-ingesting same file | Ask: "Replace, append, or merge?" |
 | Ambiguous entity linking | Ask: "Does this text relate to [entity]?" |
 | Schema conflict with existing | Ask: "Rename new table or migrate existing?" |
