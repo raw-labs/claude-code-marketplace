@@ -1,14 +1,9 @@
 {
     "name": "mxcp-expert",
-    "description": "A Claude plugin for MXCP",
-    "version": "1.0.7",
+    "description": "Expert guidance for building production MCP servers using MXCP",
+    "version": "1.0.8",
     "author": {
         "name": "RAW Labs",
-        "url": "https://www.raw-labs.com/"
-    },
-    "homepage": "https://mxcp.dev",
-    "repository": "https://github.com/raw-labs/raw-labs-claude-marketplace",
-    "license": "MIT",
-    "keywords": ["mxcp", "mcp", "model-context-protocol", "enterprise", "sql", "python"],
-    "skills": "../skills"
+        "email": "support@raw-labs.com"
+    }
 }

@@ -1,13 +1,18 @@
 {
-    "name": "raw-labs-claude-marketplace",
-    "owner": {
-        "name": "RAW Labs"
-    },
-    "plugins": [
-        {
-            "name": "mxcp-expert",
-            "source": "./plugins/mxcp-expert",
-            "description": "A Claude plugin for MXCP"
-        }
-    ]
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "raw-labs-claude-marketplace",
+  "version": "1.0.0",
+  "description": "RAW Labs plugins for Claude Code including MXCP development tools",
+  "owner": {
+    "name": "RAW Labs",
+    "email": "support@raw-labs.com"
+  },
+  "plugins": [
+    {
+      "name": "mxcp-expert",
+      "description": "Expert guidance for building production MCP servers using MXCP",
+      "source": "./plugins/mxcp-expert",
+      "category": "development"
+    }
+  ]
 }
