@@ -1,9 +1,0 @@
-{
-    "name": "mxcp-expert",
-    "description": "Expert guidance for building production MCP servers using MXCP",
-    "version": "1.0.8",
-    "author": {
-        "name": "RAW Labs",
-        "email": "support@raw-labs.com"
-    }
-}
