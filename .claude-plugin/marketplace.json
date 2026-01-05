@@ -10,7 +10,7 @@
   },
   "plugins": [
     {
-      "name": "mxcp-expert",
+      "name": "mxcp-plugin",
       "description": "Expert guidance for building production MCP servers using MXCP, including document ingestion",
       "source": "./",
       "strict": false,
