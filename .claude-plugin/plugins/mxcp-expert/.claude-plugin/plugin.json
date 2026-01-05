@@ -1,7 +1,7 @@
 {
     "name": "mxcp-expert",
     "description": "A Claude plugin for MXCP",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "author": {
         "name": "RAW Labs",
         "url": "https://www.raw-labs.com/"

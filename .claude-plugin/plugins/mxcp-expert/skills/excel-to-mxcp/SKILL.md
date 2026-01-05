@@ -1,60 +1,37 @@
 ---
 name: excel-to-mxcp
-description: "Intelligent Excel ingestion into MXCP servers. Handles messy, poorly-structured Excel files with merged cells, irregular layouts, and mixed data types. Automatically classifies data as structured (→ DuckDB/dbt), unstructured (→ RAG-friendly txt), or semi-structured (→ hybrid). Auto-detects relationships across files, generates MXCP tools, and tracks lineage. Use when: (1) Ingesting multiple Excel files into an MXCP project, (2) Processing messy Excel with merged cells or irregular structure, (3) Creating an MCP server from Excel data, (4) Preparing Excel data for RAG systems."
+description: "Intelligent single-file Excel/CSV ingestion into MXCP servers. Given ONE file (.xlsx, .xls, .csv), performs deep analysis to classify each sheet/section as structured (DuckDB/dbt) or unstructured (RAG txt). When adding to an existing MXCP project, reviews current state and decides whether to extend or update. Use when: (1) Ingesting a single Excel/CSV file into an MXCP project, (2) Adding a new data file to an existing MXCP server, (3) Processing messy Excel with merged cells or irregular structure, (4) Preparing tabular or text data for RAG systems."
 ---
 
 # Excel to MXCP Ingestion
 
-One-shot intelligent ingestion of messy Excel files into MXCP with structured data in DuckDB and unstructured data in RAG-friendly txt files.
+Single-file intelligent ingestion of Excel/CSV into MXCP. Analyzes document thoroughly before ingestion, routes data to DuckDB (structured) or RAG txt (unstructured).
 
 ## Prerequisites
 
-- xlsx skill (Anthropic) for Excel reading - provides pandas/openpyxl for reading Excel
+- xlsx skill (Anthropic) for Excel/CSV reading
 - mxcp-expert skill for MXCP server creation
 
-## State Tracking
+## Core Principles
 
-**Critical for multi-file processing across context summarizations.**
-
-Maintain `ingestion_state.json` in project root.
-
-### Rules
-
-1. **Before processing any file**: Read `ingestion_state.json` (create empty state if not exists)
-2. **When creating a table**: Check if table with similar name/columns exists → extend or merge
-3. **When detecting relationships**: Check against existing tables, not just current batch
-4. **After processing**: Update `ingestion_state.json` immediately
-5. **Pending relationships**: Track columns that look like FKs but reference tables not yet seen
-
-See [state-tracking.md](references/state-tracking.md) for state schema and extend/merge logic.
+1. **Analyze first, ingest second.** Fully understand the file before writing anything.
+2. **The project IS the state.** Discover existing state from `models/`, `tools/`, `rag_content/`.
+3. **Value-driven tools.** Understand what information is valuable before creating tools.
+4. **Test-first validation.** Compute expected results from source before implementing tools.
 
 ## Execution Pipeline
 
-Execute phases sequentially. No user interaction required.
+### Phase 0: Project Context
 
-### Phase 0: Project Setup
-
+#### New project:
 ```bash
-# If no MXCP project exists:
 mkdir my-project && cd my-project
 uv venv && source .venv/bin/activate
 uv pip install mxcp
 mxcp init --bootstrap
 ```
 
-**Create initial state file if not exists:**
-```json
-{
-  "last_updated": null,
-  "tables": {},
-  "relationships": [],
-  "tools": [],
-  "rag_chunks": {},
-  "pending_relationships": []
-}
-```
-
-**Create dbt_project.yml if not exists:**
+Create `dbt_project.yml`:
 ```yaml
 name: excel_ingestion
 version: "1.0.0"
@@ -63,328 +40,294 @@ profile: default
 model-paths: ["models"]
 ```
 
-### Phase 1: Discovery
+#### Existing project:
+```bash
+ls models/*.py models/*.sql 2>/dev/null     # Existing dbt models
+cat models/schema.yml                         # Table schemas, relationships
+ls tools/*.yml 2>/dev/null                    # Existing tools
+cat rag_content/manifest.json 2>/dev/null    # RAG content
+```
 
-**Processing order for multiple files:**
-1. Read all file names and sheet names first
-2. Process files that appear to be "master data" first (customers, products, locations)
-3. Then process transactional data (orders, sales, events)
-4. This order helps relationship detection
+Note: What entities exist? What relationships? What tools?
 
-For each Excel file, analyze structure using openpyxl:
-- Count merged cells per sheet
-- Detect max rows/columns
-- Flag sheets needing vision analysis (merged_cells > 10% of used range)
+### Phase 1: Deep Document Analysis
 
-**If structure unclear**: Render sheet to image, then analyze with vision. See [vision-analysis.md](references/vision-analysis.md).
+**Goal: Fully understand the file BEFORE any ingestion decisions.**
 
-### Phase 2: Classification
+#### 1.1 Sheet Discovery
+```python
+from openpyxl import load_workbook
+wb = load_workbook(filepath, read_only=True)
+sheets = wb.sheetnames
+```
+
+#### 1.2 Per-Sheet Analysis
+
+For EACH sheet:
+1. **Structure:** merged cells (>10% = complex), header location, data boundaries
+2. **Content:** column types, average text length, long-form text (>200 chars)
+3. **If unclear:** Use vision analysis. See [vision-analysis.md](references/vision-analysis.md).
+
+#### 1.3 Classification
+
+See [data-classification.md](references/data-classification.md):
 
 | Pattern | Classification | Destination |
 |---------|---------------|-------------|
-| Regular rows/columns, consistent headers, typed data | **Structured** | DuckDB via dbt |
-| Narrative text, paragraphs, notes, descriptions | **Unstructured** | txt for RAG |
-| Tables with embedded notes, mixed layouts | **Semi-structured** | Hybrid |
+| Regular grid, typed data, short text | **Structured** | DuckDB via dbt |
+| Long text, paragraphs, narrative | **Unstructured** | txt for RAG |
+| Mixed tables + text | **Semi-structured** | Split both |
 
-See [data-classification.md](references/data-classification.md) for detailed criteria and detection algorithm.
+**If user provides context** (e.g., "this is financial data for accountants"), use it to inform classification and Phase 4.
 
-### Phase 3: Relationship Detection
+**Document classification decisions before proceeding.**
 
-**Include tables from `ingestion_state.json` when detecting relationships.**
+### Phase 2: Integration Analysis
 
-1. Identify primary key for each table (first unique column, or column named `id`, `*_id`, `key`, etc.)
-2. Check columns for FK naming patterns (customer_id, product_id, etc.)
-3. Look for referenced table in current batch AND state
-4. If found → create relationship using detected PK (not hardcoded "id")
-5. If not found → add to pending_relationships
-6. Check if new tables resolve any pending relationships from state
+Skip if project is empty or file has only unstructured data.
 
-**After detection, update `ingestion_state.json`** with new relationships and pending items.
+#### 2.1 Primary Key Detection
 
-### Phase 4: Generate Artifacts
+For each new table, detect PK:
+```python
+def detect_pk(df, table_name):
+    patterns = ['id', f'{table_name}_id', f'{table_name[:-1]}_id', 'key', 'code']
+    for p in patterns:
+        if p in df.columns and df[p].is_unique and df[p].notna().all():
+            return p
+    # Fallback: first unique column
+    for col in df.columns:
+        if df[col].is_unique and df[col].notna().all():
+            return col
+    return None
+```
 
-#### Structured Data → dbt Python Models
+#### 2.2 Relationship Detection
+
+Detect FK columns by:
+- Naming patterns: `*_id`, `*_key`, `*_code`
+- Value matching: column values exist in another table's PK
+
+#### 2.3 Integration Decisions
+
+For each NEW structured table:
+1. **Same name exists?** → Extend with UNION
+2. **>70% column overlap?** → Merge candidate
+3. **FK columns?** → Link to existing tables
+4. **Schema conflict?** → Rename or migrate
+
+**Document decisions before proceeding.**
+
+### Phase 3: Generate Artifacts
+
+**Skip DuckDB parts if only unstructured data. Skip RAG parts if only structured data.**
+
+#### Structured Data → dbt Models
 
 ```python
-# models/load_{source_file}_{sheet_name}.py
+# models/load_{source}_{sheet}.py
 import pandas as pd
 
 def model(dbt, session):
-    """Lineage: {source_file} > {sheet_name}"""
-    df = pd.read_excel('{filepath}', sheet_name='{sheet_name}')
+    df = pd.read_excel('{filepath}', sheet_name='{sheet}')
     df = df.dropna(how='all')
     df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('[^a-z0-9_]', '', regex=True)
     return df
 ```
 
-#### Extending Existing Tables
+#### Extending existing table:
+```sql
+SELECT * FROM {{ ref('load_existing') }}
+UNION ALL
+SELECT * FROM {{ ref('load_new') }}
+```
 
-When `should_extend_table()` returns "extend":
-- If same columns: Create new model, then create a UNION view
-- If additional columns: Modify existing model to include new columns, or create joined view
-
-When returns "merge_candidate": Review column mapping, may need manual decision.
-
-#### dbt schema.yml with tests
-
+#### Update schema.yml
 ```yaml
-# models/schema.yml
 version: 2
 models:
   - name: customers
+    description: "Source: sales.xlsx > Customers"
     columns:
       - name: id
         tests: [not_null, unique]
-      - name: email
-        tests: [not_null]
-  - name: orders
-    columns:
-      - name: id
-        tests: [not_null, unique]
-      - name: customer_id
-        tests:
-          - not_null
-          - relationships:
-              to: ref('customers')
-              field: id
 ```
 
-#### Unstructured Data → RAG-friendly txt
+#### Unstructured Data → RAG txt
 
-Chunk by section with context headers. See [data-classification.md](references/data-classification.md#rag-friendly-txt-format) for format.
+```
+=== SOURCE METADATA ===
+File: {source_file}
+Sheet: {sheet_name}
+Generated: {timestamp}
 
-#### Semi-structured Data → Hybrid
+=== CONTENT ===
+{extracted text}
 
-1. Extract tabular portions → dbt Python model
-2. Extract narrative portions → txt file
-3. Link via row/section identifiers
+=== KEYWORDS ===
+{keywords}
+```
 
-#### Incremental Validation
+Update `rag_content/manifest.json`.
 
+#### Validate
 ```bash
-mxcp validate    # Verify YAML structure
-mxcp dbt run     # Build models and load data
-mxcp dbt test    # Run data quality tests
+mxcp validate && mxcp dbt run && mxcp dbt test
 ```
 
-**Stop and fix any errors before proceeding.**
+**Stop and fix errors before proceeding.**
 
-### Phase 5: Tool Design
+### Phase 4: Data Value Analysis
 
-**Goal: Expose the most valuable information through tools so LLMs can answer user questions.**
+**Goal: Understand what information is valuable BEFORE creating tools.**
 
-#### Analyze Data Value
+**Skip if only unstructured data (no tools needed for RAG-only content).**
 
-Before creating tools, understand the data:
-1. What entities exist? (customers, orders, products, etc.)
-2. What are the key metrics? (totals, counts, averages)
-3. What relationships matter? (customer orders, product sales)
-4. What would users likely ask about this data?
+#### 4.1 Domain Understanding
 
-#### Tool Design Principles
+1. **Domain:** Financial? Sales? HR? Operations?
+2. **Users:** What role? What decisions?
+3. **Entities:** Primary entities and relationships
+4. **Metrics:** Totals, counts, trends, rankings
+5. **Insights:** Aggregations, filters, joins that matter
 
-| User Need | Tool Pattern | Example |
-|-----------|--------------|---------|
-| Lookup specific record | `get_{entity}_by_{key}` | `get_customer_by_id` |
-| Search/filter records | `search_{entities}` | `search_products` |
-| List all records | `list_{entities}` | `list_categories` |
-| Aggregate metrics | `get_{metric}_summary` | `get_sales_summary` |
-| Relationship queries | `get_{related}_for_{entity}` | `get_orders_for_customer` |
-| Time-based analysis | `get_{entity}_by_{period}` | `get_sales_by_month` |
+**If user provided context, use it here.**
 
-#### Derive Tools From Data
+#### 4.2 Question Generation
 
-```
-For each structured table:
-1. Create lookup tool if table has clear PK
-2. Create search tool if table has searchable text columns
-3. Create list tool if table is reference/dimension data
+Generate 5-15 concrete questions users would ask. Examples:
+- "What are the total sales for customer X?"
+- "Which products sold the most?"
+- "Show me orders over $10,000"
 
-For relationships:
-4. Create tools that traverse relationships (get orders for customer)
+#### 4.3 Compute Ground Truth
 
-For numeric columns:
-5. Create aggregation tools (sum, avg, count by category)
+**CRITICAL: Compute expected results from source Excel BEFORE writing tools.**
 
-Based on user hints in prompt:
-6. Prioritize tools that match user's stated goals
-7. Add domain-specific tools based on data context
+For each question:
+```python
+# Question: "Total sales for customer 101?"
+df = pd.read_excel('sales.xlsx', sheet_name='Orders')
+expected = df[df['customer_id'] == 101]['amount'].sum()
+# Result: 45230.50
 ```
 
-#### Example: Sales Data
+Record with precision:
+```yaml
+question: "Total sales for customer 101"
+expected: 45230.50
+derivation: "df[df['customer_id'] == 101]['amount'].sum()"
+```
 
-If data contains customers, orders, products:
-- `get_customer_by_id` - lookup
-- `search_customers` - by name/email
-- `get_orders_for_customer` - relationship
-- `get_sales_by_product` - aggregation
-- `get_top_customers` - analytics
-- `get_monthly_revenue` - time series
+**These expected results become test assertions in tool definitions.**
 
-### Phase 6: Tool Generation (Test-Driven)
+### Phase 5: Tool Design & Implementation
 
-**CRITICAL: Test-first approach. Derive expected results from source data BEFORE writing queries.**
+**Goal: Create tools that answer identified questions.**
 
-#### Step 1: Derive Expected Results
+#### 5.1 Design Principles
 
-Calculate expected results from source Excel/pandas data (ground truth). See [validation.md](references/validation.md#test-derivation-by-tool-type).
+Each tool must be:
+1. **Self-documenting** - LLM understands without extra context
+2. **Well-parametrized** - Clear names, types, descriptions, examples
+3. **Focused** - One tool = one question type
+4. **Predictable** - Same inputs → same outputs
 
-#### Step 2: Create Test Cases
-
-Write tests FIRST with expected values:
+#### 5.2 Tool Structure
 
 ```yaml
-# tools/get_customer_by_id.yml
 mxcp: 1
 tool:
-  name: get_customer_by_id
+  name: get_customer_sales
   description: |
-    Get customer details by ID. Returns customer profile with contact info.
-    Source: sales_data.xlsx > Customers
+    Get total sales for a customer.
+    Returns sum of order amounts for the given customer ID.
+    Use when asked about customer spending or sales volume.
   parameters:
     - name: customer_id
       type: integer
       description: The customer's unique identifier
+      required: true
+      examples: [101, 205]
   return:
     type: object
     properties:
-      id: {type: integer}
-      name: {type: string}
-      email: {type: string}
+      customer_id: {type: integer}
+      total_sales: {type: number}
+      order_count: {type: integer}
   source:
-    file: ../sql/get_customer_by_id.sql
+    file: ../sql/get_customer_sales.sql
   tests:
-    - name: lookup_existing_customer
-      description: "Expected from source: row 5 of Customers sheet"
+    - name: customer_101
+      description: "Verified against source Excel"
       arguments: [{key: customer_id, value: 101}]
-      result:
-        id: 101
-        name: "Acme Corp"
-        email: "contact@acme.com"
-    - name: lookup_nonexistent
-      arguments: [{key: customer_id, value: 99999}]
-      result: null
+      result: {customer_id: 101, total_sales: 45230.50, order_count: 4}
 ```
 
-#### Step 3: Write Tool Implementation
+#### 5.3 Tool Categories
 
-```sql
--- sql/get_customer_by_id.sql
-SELECT id, name, email
-FROM customers
-WHERE id = $customer_id
+| Question Type | Pattern | Example |
+|--------------|---------|---------|
+| Lookup | `get_{entity}_by_id` | `get_customer_by_id` |
+| Aggregation | `get_{entity}_{metric}` | `get_customer_sales` |
+| Search | `search_{entities}` | `search_orders` |
+| Rankings | `get_top_{entities}` | `get_top_products` |
+| Time-based | `get_{metric}_by_{period}` | `get_sales_by_month` |
+
+#### 5.4 Existing Tools
+
+If extending data, verify existing tools:
+```bash
+mxcp test  # Run existing tests
 ```
+If tests fail, investigate if new data changes expected results.
 
-#### Step 4: Validate and Lint
+### Phase 6: Validation & Reconciliation
 
 ```bash
-mxcp validate    # Schema correctness - fix any errors
-mxcp lint        # Metadata quality - ensure descriptions, types, examples
-```
-
-**Fix all issues before proceeding.**
-
-#### Step 5: Run Tests and Investigate Mismatches
-
-```bash
-mxcp test
+mxcp validate && mxcp lint && mxcp test
 ```
 
 **If tests fail, investigate systematically:**
 
-1. Verify expected result is correct (re-check source Excel, use pandas)
-2. Verify query logic: `mxcp query "SELECT * FROM customers WHERE id = 101"`
-3. Cross-validate using [validation.md](references/validation.md#cross-validation-function)
+1. Re-verify pandas calculation from source
+2. Check data in DuckDB: `mxcp query "SELECT ..."`
+3. Identify source: row filtering? type conversion? column normalization?
+4. Fix root cause (not just the tool)
 
-#### Step 6: Document Verification
+**All tests must pass.**
 
-Each tool description should include verification notes (source file/sheet, cross-checks passed).
+### Phase 7: Summary
 
-### Phase 7: Comprehensive Validation
-
-**All tests must pass. Any failure requires investigation.**
-
-```bash
-mxcp validate    # Schema correctness
-mxcp lint        # Metadata quality
-mxcp dbt test    # Data integrity (not_null, unique, relationships)
-mxcp test        # Tool tests (expected results from source)
-```
-
-#### Validation Checklist
-
-- [ ] `mxcp validate` passes
-- [ ] `mxcp lint` passes
-- [ ] `mxcp dbt test` passes
-- [ ] `mxcp test` passes - all expected results match source data
-- [ ] Row counts match source Excel for each table
-- [ ] Numeric column sums match source calculations
-- [ ] Sample rows (5 per table) verified against source
-- [ ] Relationship integrity verified (FK values exist)
-- [ ] No data loss (all source rows accounted for)
-
-**If any check fails: STOP and investigate.**
-
-See [validation.md](references/validation.md) for cross-validation functions.
-
-#### Final Summary
-
-Log ingestion report: files processed, tables created (with row counts), txt files generated, relationships detected, tools generated, validation results.
+Document:
+- File processed, classification decisions
+- Tables created/extended (with row counts)
+- RAG chunks created
+- Questions identified, tools created
+- Discrepancies found and resolved
 
 ## Output Structure
 
 ```
-mxcp-project/
+project/
 ├── mxcp-site.yml
-├── dbt_project.yml                # Required for dbt
-├── ingestion_state.json           # Persistent state
+├── dbt_project.yml
 ├── models/
-│   ├── load_sales_customers.py    # dbt Python models
-│   ├── load_sales_orders.py
-│   └── schema.yml                 # dbt tests
+│   ├── load_{source}_{sheet}.py
+│   └── schema.yml
 ├── tools/
-│   ├── get_customer_by_id.yml
-│   ├── search_customers.yml
-│   └── get_orders_for_customer.yml
+│   └── get_*.yml
 ├── sql/
 │   └── *.sql
 ├── rag_content/
-│   ├── sales_notes_section1.txt   # RAG chunks
-│   └── manifest.json              # Lineage tracking
-├── data/
-│   └── db-default.duckdb
-└── ingestion_report.json
-```
-
-## Lineage Tracking
-
-Generate `rag_content/manifest.json`:
-
-```json
-{
-  "generated": "2024-01-15T10:30:00Z",
-  "sources": [
-    {
-      "file": "sales_data.xlsx",
-      "sheets": [
-        {"name": "Customers", "type": "structured", "table": "customers"},
-        {"name": "Notes", "type": "unstructured", "chunks": 5}
-      ]
-    }
-  ],
-  "relationships": [
-    {"from": "orders.customer_id", "to": "customers.id"}
-  ]
-}
+│   ├── *.txt
+│   └── manifest.json
+└── data/
+    └── db-default.duckdb
 ```
 
 ## Error Handling
 
-Continue on individual file/sheet errors. Log error and include in final summary.
-
-## Capacity
-
-- Process files incrementally to manage context
-- Build schema progressively across files
-- For very large files, process sheets individually
-- State tracking enables resumption after context summarization
+- Sheet analysis fails → Log, skip, continue
+- Model build fails → Stop, fix
+- Test fails → Investigate root cause
