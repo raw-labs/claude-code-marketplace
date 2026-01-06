@@ -3,7 +3,7 @@
 ## Table of Contents
 - [Strategy Decision](#strategy-decision)
 - [Code-Based Extraction](#code-based-extraction)
-- [Manual Step-by-Step Extraction](#manual-step-by-step-extraction)
+- [Complex Content Extraction](#complex-content-extraction)
 - [Hybrid Approach](#hybrid-approach)
 - [Large Document Workflow](#large-document-workflow)
 
@@ -23,7 +23,7 @@
 
 **Code extraction is faster and more reliable for structured content.**
 
-### Use Manual Step-by-Step Extraction When:
+### Use Complex Extraction When:
 
 | Indicator | Example |
 |-----------|---------|
@@ -34,14 +34,16 @@
 | Mixed content blocks | Tables interrupted by notes |
 | Decision required | "Is this data or just an example?" |
 
-**Manual extraction is necessary when understanding is required to classify.**
+**Complex extraction requires understanding first, but still produces reproducible scripts.**
 
 ### Decision Algorithm
 
 ```python
 def decide_extraction_strategy(content_block):
     """
-    Returns: 'code' | 'manual' | 'skip'
+    Returns: 'simple' | 'complex' | 'skip'
+    simple = direct pandas/dbt extraction
+    complex = needs preprocessing script, but still reproducible
     """
     if content_block['type'] == 'table':
         table = content_block['data']
@@ -56,9 +58,9 @@ def decide_extraction_strategy(content_block):
             if avg_cell_length < 100:
                 return 'code'  # Clean table, extract with code
             else:
-                return 'manual'  # Long text cells, need to understand
+                return 'complex'  # Long text cells, need preprocessing
         else:
-            return 'manual'  # Messy table, process manually
+            return 'complex'  # Messy table, needs preprocessing
 
     elif content_block['type'] == 'paragraph':
         text = content_block['text']
@@ -66,11 +68,11 @@ def decide_extraction_strategy(content_block):
         if len(text) < 50:
             return 'skip'  # Too short, likely whitespace/header
         elif len(text) > 2000:
-            return 'manual'  # Long content, need to chunk intelligently
+            return 'complex'  # Long content, needs chunking logic
         else:
             return 'code'  # Standard paragraph, chunk programmatically
 
-    return 'manual'  # Default to manual for unknown types
+    return 'complex'  # Default to complex for unknown types
 ```
 
 ## Code-Based Extraction
@@ -147,48 +149,41 @@ for i, chunk in enumerate(chunks):
     print(f"Wrote chunk {i}: {chunk['section']}")
 ```
 
-## Manual Step-by-Step Extraction
+## Complex Content Extraction
 
-**Agent reads content, understands it, and decides what to extract.**
+**When content requires understanding before extraction, the agent reads and classifies first, then generates reproducible scripts.**
 
-### Workflow for Manual Extraction
+### Workflow
 
 1. **Read a section** (10-20 pages at a time for large docs)
-2. **Classify each element:**
-   - Is this data that belongs in DB?
-   - Is this narrative that belongs in RAG?
-   - Is this just formatting/boilerplate to skip?
-3. **Extract with understanding:**
-   - For tables: understand column meanings, clean data
-   - For text: identify key information, create meaningful chunks
-4. **Write to destination:**
-   - DB: use pandas + duckdb
-   - RAG: write txt files with proper metadata
-5. **Track progress:** note what pages were processed
+2. **Classify each element:** DB, RAG, or skip?
+3. **Design extraction approach:** What preprocessing is needed?
+4. **Generate dbt model or script** that handles the complexity
+5. **Verify output** matches source
 
-### Example Manual Flow
+**Key principle:** Even complex content must result in reproducible scripts (dbt models or Python scripts), not one-time manual writes.
+
+### Example: Complex Document
 
 ```
 Agent reads pages 1-10:
 
 Page 1-2: Title page and TOC → SKIP
-Page 3-5: Executive Summary → RAG (summarizes key findings)
-Page 6: Methodology table → DB (but has merged cells, need to flatten)
-Page 7-10: Detailed analysis → RAG (narrative with entity mentions)
+Page 3-5: Executive Summary → RAG
+Page 6: Methodology table (merged cells) → DB (needs preprocessing)
+Page 7-10: Detailed analysis → RAG
 
-Agent actions:
-1. Skip pages 1-2
-2. Extract pages 3-5 text → write to rag_content/executive_summary.txt
-3. Read page 6 table carefully, understand structure, create clean DataFrame → write to DB
-4. Extract pages 7-10, identify entity links → write to rag_content/analysis.txt with DB links
+Agent generates:
+- models/report/load_methodology.py  # handles merged cells
+- scripts/report/extract_rag.py       # extracts summary + analysis
 ```
 
 ### When Agent Should Pause and Think
 
-- **Ambiguous table:** "This table has 'Notes' column with paragraphs - should I split it?"
-- **Context-dependent:** "This paragraph says 'as shown above' - need to link to previous content"
-- **Quality decision:** "This data looks like an example, not real data - should I skip?"
-- **Incomplete extraction:** "Table continues on next page - need to merge"
+- **Ambiguous table:** "This table has 'Notes' column with paragraphs - should I split DB/RAG?"
+- **Context-dependent:** "References 'see above' - need to resolve before chunking"
+- **Quality decision:** "This data looks like an example, not real data - skip?"
+- **Incomplete extraction:** "Table continues on next page - merge in preprocessing"
 
 ## Hybrid Approach
 
@@ -202,16 +197,16 @@ Agent actions:
    - Count tables
    - Estimate page count per section
 
-2. CLASSIFY (manual): Review structure, decide per-section strategy
+2. CLASSIFY: Review structure, decide per-section strategy
    - Section A: tables look clean → code extraction
-   - Section B: complex narrative → manual extraction
+   - Section B: complex narrative → complex extraction
    - Section C: appendix data → code extraction
 
 3. EXTRACT (mixed): Execute strategies
    - Run code extraction for A and C
-   - Manually process B
+   - Process B with preprocessing script
 
-4. LINK (manual): Review extracted content
+4. LINK: Review extracted content
    - Identify cross-references
    - Create RAG-DB links
 
@@ -250,7 +245,7 @@ Process document in logical sections:
 ```
 For each major section:
   1. Read section content
-  2. Decide: code or manual extraction?
+  2. Decide: simple or complex extraction?
   3. Extract content
   4. Write to DB/RAG
   5. Update manifest
@@ -268,7 +263,7 @@ Maintain processing state:
   "total_sections": 12,
   "processed_sections": [
     {"name": "Introduction", "strategy": "code", "status": "done"},
-    {"name": "Methodology", "strategy": "manual", "status": "done"},
+    {"name": "Methodology", "strategy": "complex", "status": "done"},
     {"name": "Results", "strategy": "code", "status": "in_progress"}
   ],
   "tables_extracted": 15,

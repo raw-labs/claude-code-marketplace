@@ -221,14 +221,16 @@ mxcp test --tool get_customer_sales
 
 ## Computing Ground Truth
 
-**Always compute expected values from source data BEFORE writing tests.**
+**Always compute expected values from the ORIGINAL SOURCE FILE (Excel/Word), NOT the database.**
+
+Why? The database could have extraction bugs. If you compute expected values from the database, you're testing that "database equals database" - not that "extraction is correct."
 
 ### For Numeric Aggregations
 
 ```python
 import pandas as pd
 
-# Load source data
+# CORRECT: Load ORIGINAL source file
 df = pd.read_excel('source_data/sales_report.xlsx')
 
 # Compute expected values for test cases
@@ -238,6 +240,11 @@ customer_101_count = df[df['customer_id'] == 101].shape[0]
 print(f"Customer 101: total={customer_101_sales}, count={customer_101_count}")
 # Output: Customer 101: total=15750.50, count=3
 # Use these exact values in test result
+
+# WRONG - Don't query database for expected values:
+# conn = duckdb.connect('data/db-default.duckdb')
+# result = conn.execute("SELECT SUM(amount) FROM sales WHERE customer_id = 101")
+# This defeats the purpose - you're not testing extraction correctness!
 ```
 
 ### For RAG Link Tests

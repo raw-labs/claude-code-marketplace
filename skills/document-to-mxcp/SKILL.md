@@ -5,8 +5,6 @@ description: "Intelligent single-file document ingestion into MXCP servers. Supp
 
 # Document to MXCP Ingestion
 
-Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes content to determine: will queries be needed (→ DuckDB) or semantic search (→ RAG txt)? Supports bidirectional references.
-
 ## Supported Formats
 
 - **Excel:** .xlsx, .xls, .csv
@@ -24,23 +22,11 @@ Single-file intelligent ingestion of Excel/Word documents into MXCP. Analyzes co
 
 **Always use the appropriate skill** - don't try to implement Excel/Word parsing or MXCP operations from scratch.
 
-## Environment Requirements
+## Environment
 
-**Always use `uv` for package management and run in a virtual environment.**
-
-```bash
-# Create and activate venv (if not exists)
-uv venv && source .venv/bin/activate
-
-# Required packages
-uv pip install mxcp pandas openpyxl python-docx duckdb
-```
-
-**Never install packages globally. Always verify venv is active before running commands.**
-
-## Database
-
-**Always use the default database: `data/db-default.duckdb`** - created automatically by MXCP if not specified. Never create custom database names.
+- **Package manager:** `uv` with virtual environment (never global installs)
+- **Required packages:** `mxcp pandas openpyxl python-docx duckdb`
+- **Database:** Always use default `data/db-default.duckdb` (auto-created by MXCP)
 
 ## Core Principles
 
@@ -49,7 +35,7 @@ uv pip install mxcp pandas openpyxl python-docx duckdb
 3. **Code-first extraction.** Always generate dbt models and scripts. Manual extraction is not reproducible.
 4. **The project IS the state.** Discover existing state from `models/`, `tools/`, `rag_content/`.
 5. **Value-driven tools.** Understand what information is valuable before creating tools.
-6. **Test-first validation.** Compute expected results from source before implementing tools.
+6. **Test-first validation.** Compute expected results from ORIGINAL SOURCE FILE (not database) before implementing tools.
 7. **Ask when uncertain.** If classification or linking is ambiguous, ask the user.
 
 ## Execution Pipeline
@@ -64,14 +50,7 @@ uv pip install mxcp pandas openpyxl python-docx duckdb
 mxcp init --bootstrap
 ```
 
-Create `dbt_project.yml`:
-```yaml
-name: document_ingestion
-version: "1.0.0"
-config-version: 2
-profile: default
-model-paths: ["models"]
-```
+Create `dbt_project.yml` with `model-paths: ["models"]`.
 
 #### Existing project:
 ```bash
@@ -238,12 +217,8 @@ For each NEW structured table:
 
 **When adding files to existing project:**
 - Review existing `models/`, `scripts/`, `tools/` before creating new ones
-- If new file has same entity type (e.g., both have "customers"), decide:
-  - **Separate tables:** Keep `load_file1_customers` and `load_file2_customers` distinct
-  - **Combined view:** Create `models/combined_customers.sql` that UNIONs both
-  - **Update existing:** Modify existing model to read from multiple sources
-- Update existing tools if they should query combined data
-- Never create duplicates - if a tool `get_customer` exists, extend it rather than creating `get_customer_v2`
+- Same entity in multiple files? Create combined view or extend existing model
+- Never create duplicates - extend existing tools rather than creating `_v2` versions
 
 **Document decisions before proceeding.**
 
@@ -254,22 +229,43 @@ For each NEW structured table:
 - Update output automatically when source files change
 - Are version-controlled alongside the project
 
+#### Folder Structure Per Source
+
+**All artifacts for a source file share the same folder name:**
+
+```
+{source} = sanitized filename (e.g., sales_report_2024)
+
+models/{source}/          # dbt models for this source
+tools/{source}/           # tools for querying this source
+rag_content/{source}/     # RAG chunks from this source
+scripts/{source}/         # standalone scripts (if RAG-only)
+```
+
+Example for `sales_report.xlsx`:
+```
+models/sales_report/
+├── load_orders.py        # → table: sales_report_orders
+├── load_products.py      # → table: sales_report_products
+└── generate_rag.py       # generates RAG from DB (if Both)
+
+tools/sales_report/
+├── get_order.yml
+└── search_products.yml
+
+rag_content/sales_report/
+├── chunk_001.txt
+└── chunk_002.txt
+```
+
+This makes it easy to identify, update, or remove all artifacts for a source.
+
 #### DB Only → dbt Models
 
-For structured data that needs queries, create dbt models with source-specific naming:
-
-**Naming convention:** `models/load_{source}_{sheet}.py` → table `load_{source}_{sheet}`
-- `{source}` = sanitized filename (e.g., `sales_report_2024`)
-- `{sheet}` = sheet/table name (e.g., `transactions`, `customers`)
-
-Example: `sales_report.xlsx` with sheets "Orders" and "Products" creates:
-- `models/load_sales_report_orders.py` → table `load_sales_report_orders`
-- `models/load_sales_report_products.py` → table `load_sales_report_products`
-
-This allows multiple files to coexist without conflicts. Each file's models are independent.
-
 **Model requirements:**
-- Read from `source_data/{filename}` (copy source files there first)
+- Place in `models/{source}/` folder
+- Table name: `{source}_{sheet}` (e.g., `sales_report_orders`)
+- Read from `source_data/{filename}`
 - Clean column names: lowercase, underscores, alphanumeric only
 
 **Idempotency:** dbt models are inherently idempotent - re-running `mxcp dbt run` rebuilds tables from source.
@@ -280,17 +276,15 @@ Minimum tests: row count, `not_null` + `unique` on PK, `relationships` on FKs, `
 
 #### RAG Only → Extraction Script
 
-For text content that only needs semantic search (no DB queries), create a standalone script:
-
-**Naming convention:** `scripts/extract_rag_{source}.py` → folder `rag_content/{source}/`
+For text content that only needs semantic search (no DB queries):
 
 ```python
-# scripts/extract_rag_annual_report.py
+# scripts/annual_report/extract_rag.py
 import os
 import shutil
 from docx import Document
 
-source_name = "annual_report"  # matches script name, creates rag_content/annual_report/
+source_name = "annual_report"  # must match folder name
 shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
 os.makedirs(f"rag_content/{source_name}")
 
@@ -301,35 +295,27 @@ for idx, para in enumerate(doc.paragraphs):
             f.write(para.text)
 ```
 
-RAG files: `rag_content/{source_name}/*.txt` - plain text only, never `.md`. See [rag-format.md](references/rag-format.md).
+RAG files: plain text only, never `.md`. See [rag-format.md](references/rag-format.md).
 
-**Chunk size:** Small for standalone facts, medium for sections needing context, large for flowing narratives. Never split mid-sentence.
+**Chunk size:** Small for standalone facts, medium for sections needing context, large for narratives. Never split mid-sentence.
 
 #### DB + RAG → dbt Model + RAG Generation
 
-**Why both?** Different retrieval needs:
-- **DB:** User knows criteria ("filter by category X", "sum amounts for Q1")
-- **RAG:** User describes semantically ("find content about performance issues")
-
-When data needs both, ingest to DB first, then generate RAG from DB:
-
-**Naming convention:** `models/generate_rag_{source}.py` → folder `rag_content/{source}/`
+**Why both?** DB for structured queries, RAG for semantic search on same data.
 
 ```python
-# models/generate_rag_product_catalog.py - dbt.ref() creates dependency
+# models/product_catalog/generate_rag.py - dbt.ref() creates dependency
 import os
 import shutil
 
 def model(dbt, session):
-    df = dbt.ref("load_product_catalog_items").df()
-    source_name = "product_catalog"
+    df = dbt.ref("product_catalog_items").df()
+    source_name = "product_catalog"  # must match folder name
 
-    # Idempotent: clear and recreate folder
     shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
     os.makedirs(f"rag_content/{source_name}")
 
     for idx, row in df.iterrows():
-        # Format row data as narrative text
         content = f"{row['name']}: {row['description']}"
         with open(f"rag_content/{source_name}/chunk_{idx}.txt", "w") as f:
             f.write(content)
@@ -375,7 +361,19 @@ Generate 5-15 concrete questions:
 
 #### 4.3 Compute Ground Truth
 
-Compute expected values from source data before writing tests. Query pandas DataFrames for aggregations, scan RAG chunks for link verification.
+**Compute expected values from the ORIGINAL SOURCE FILE, not the database.**
+
+```python
+# CORRECT: Read original file with pandas
+df = pd.read_excel("source_data/sales_report.xlsx")
+expected_count = len(df)
+expected_total = df["amount"].sum()
+
+# WRONG: Query database (could have extraction bugs)
+# result = duckdb.query("SELECT COUNT(*) FROM sales")  # Don't use this!
+```
+
+If database results don't match source file calculations, the extraction has a bug.
 
 ### Phase 5: Tool Design & Implementation
 
@@ -408,11 +406,11 @@ For columns with ≤20 unique values: add `enum` to parameter schema and list va
 **Every tool MUST include tests.** See [testing.md](references/testing.md) for complete format and examples.
 
 Before writing each tool:
-1. Query source data to compute expected result
-2. Add test cases matching pre-computed values
+1. Compute expected values from ORIGINAL SOURCE FILE (Excel/Word) using pandas/python-docx
+2. Add test cases with those pre-computed values
 3. Include edge cases (empty, single, multiple results)
 
-**Test values must match source data exactly.** If test fails, investigate - never just adjust expected value.
+**Test values must come from source file, not database.** If tool query returns different values than source file analysis, the extraction has a bug - fix the extraction, don't adjust the test.
 
 ### Phase 6: Run All Tests (REQUIRED)
 
@@ -443,22 +441,28 @@ project/
 ├── source_data/
 │   └── {original files}
 ├── models/
-│   ├── load_*.py              # dbt models for DB ingestion
-│   ├── generate_rag_*.py      # dbt models for RAG from DB (if Both)
+│   ├── {source}/              # folder per source file
+│   │   ├── load_*.py          # dbt models for DB ingestion
+│   │   └── generate_rag.py    # RAG generation (if Both)
+│   ├── combined_*.sql         # combined views across sources (if needed)
 │   └── schema.yml
 ├── scripts/
-│   └── extract_rag_*.py       # standalone scripts for RAG-only content
+│   └── {source}/              # folder per source file
+│       └── extract_rag.py     # standalone RAG extraction
 ├── tools/
-│   └── *.yml
+│   └── {source}/              # folder per source file
+│       └── *.yml
 ├── sql/
 │   └── *.sql
 ├── rag_content/
-│   ├── {source_name}/         # nested folder per source file
+│   ├── {source}/              # folder per source file
 │   │   └── *.txt              # .txt only, never .md
 │   └── manifest.json
 └── data/
     └── db-default.duckdb
 ```
+
+**Consistency rule:** `{source}` folder name must match across `models/`, `tools/`, `scripts/`, and `rag_content/`.
 
 ## When to Ask User
 
