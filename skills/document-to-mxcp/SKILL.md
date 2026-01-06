@@ -81,23 +81,59 @@ source .venv/bin/activate
 # Verify/install dependencies
 uv pip install mxcp pandas openpyxl python-docx duckdb
 
-# Discover current state
+# Discover current state - MUST review before adding new files
 ls models/*.py models/*.sql 2>/dev/null     # Existing dbt models
 cat models/schema.yml                         # Table schemas, relationships
 ls tools/*.yml 2>/dev/null                    # Existing tools
+ls scripts/*.py 2>/dev/null                   # Existing RAG extraction scripts
 cat rag_content/manifest.json 2>/dev/null    # RAG content
 ```
 
-Note: What entities exist? What relationships? What RAG-DB links?
+**Before proceeding, understand:**
+- What entities/tables already exist?
+- What tools are available and what do they query?
+- Will the new file's data overlap with existing data?
+- Should new data extend existing models or stay separate?
 
-#### Re-ingestion (same file, updated content):
+#### State Tracking
 
-If the same source file was previously ingested:
-1. Check `manifest.json` for existing chunks from this file
-2. **Ask user:** "This file was previously ingested. Should I: (a) Replace all content, (b) Append new content, (c) Merge with deduplication?"
-3. For replace: Delete old models/chunks, create new
-4. For append: Create new models with `_v2` suffix, update combined views
-5. For merge: Compare row-by-row, update changed, add new
+**The project tracks ingestion state through its artifacts.** Before any ingestion, compare:
+
+| Check | How | Action if Mismatch |
+|-------|-----|-------------------|
+| Source files exist | `ls source_data/` vs models that reference them | Warn: "Model X references missing file Y" |
+| Schema changes | Compare source columns vs `schema.yml` | Detect added/removed columns |
+| Row counts | Query DB vs source file counts | Detect data changes |
+| RAG coverage | `manifest.json` sources vs `source_data/` | Detect orphaned chunks |
+
+```bash
+# Quick state check
+ls source_data/                              # What files exist
+mxcp query "SELECT name FROM sqlite_master WHERE type='table'"  # What tables exist
+cat rag_content/manifest.json | grep '"source"' | sort -u       # What RAG sources exist
+```
+
+#### Handling Changes
+
+**Updated file (same name, different content):**
+1. Compare columns: source file vs existing model's schema
+2. If columns added: Update model to include new columns, backfill nulls if needed
+3. If columns removed: **Ask user** - drop column or keep with nulls?
+4. If rows changed: Re-run model (idempotent - rebuilds from source)
+5. Regenerate dependent RAG content
+
+**Deleted source file:**
+1. **Ask user:** "Source file X was deleted. Should I: (a) Keep existing tables/RAG, (b) Remove all artifacts from this source?"
+2. If remove: Delete model, drop table, remove RAG folder, update manifest
+
+**New version alongside old (e.g., `report_2023.xlsx` + `report_2024.xlsx`):**
+1. Create separate models per file: `load_report_2023_*`, `load_report_2024_*`
+2. Create combined view if needed: `models/combined_report.sql`
+3. Update tools to query combined view
+
+**Duplicate detection:**
+- Before ingestion, check if same data exists: `SELECT COUNT(*) FROM existing WHERE key IN (new_keys)`
+- If duplicates found: **Ask user** - skip duplicates, update existing, or create versioned records?
 
 ### Phase 1: Deep Document Analysis
 
@@ -195,10 +231,19 @@ Detect FK columns by:
 #### 2.4 Integration Decisions
 
 For each NEW structured table:
-1. **Same name exists?** → Extend with UNION
-2. **>70% column overlap?** → Merge candidate
+1. **Same entity exists?** → Create combined view or extend existing model
+2. **>70% column overlap?** → Merge candidate, align schemas
 3. **FK columns?** → Link to existing tables
-4. **Related RAG content?** → Plan bidirectional links
+4. **Related RAG content?** → Update manifest with cross-references
+
+**When adding files to existing project:**
+- Review existing `models/`, `scripts/`, `tools/` before creating new ones
+- If new file has same entity type (e.g., both have "customers"), decide:
+  - **Separate tables:** Keep `load_file1_customers` and `load_file2_customers` distinct
+  - **Combined view:** Create `models/combined_customers.sql` that UNIONs both
+  - **Update existing:** Modify existing model to read from multiple sources
+- Update existing tools if they should query combined data
+- Never create duplicates - if a tool `get_customer` exists, extend it rather than creating `get_customer_v2`
 
 **Document decisions before proceeding.**
 
@@ -211,7 +256,19 @@ For each NEW structured table:
 
 #### DB Only → dbt Models
 
-For structured data that needs queries, create dbt models: `models/load_{source}_{sheet}.py`
+For structured data that needs queries, create dbt models with source-specific naming:
+
+**Naming convention:** `models/load_{source}_{sheet}.py` → table `load_{source}_{sheet}`
+- `{source}` = sanitized filename (e.g., `sales_report_2024`)
+- `{sheet}` = sheet/table name (e.g., `transactions`, `customers`)
+
+Example: `sales_report.xlsx` with sheets "Orders" and "Products" creates:
+- `models/load_sales_report_orders.py` → table `load_sales_report_orders`
+- `models/load_sales_report_products.py` → table `load_sales_report_products`
+
+This allows multiple files to coexist without conflicts. Each file's models are independent.
+
+**Model requirements:**
 - Read from `source_data/{filename}` (copy source files there first)
 - Clean column names: lowercase, underscores, alphanumeric only
 
@@ -225,17 +282,19 @@ Minimum tests: row count, `not_null` + `unique` on PK, `relationships` on FKs, `
 
 For text content that only needs semantic search (no DB queries), create a standalone script:
 
+**Naming convention:** `scripts/extract_rag_{source}.py` → folder `rag_content/{source}/`
+
 ```python
-# scripts/extract_rag.py - run separately, not as dbt model
+# scripts/extract_rag_annual_report.py
 import os
 import shutil
-from docx import Document  # or pandas for Excel
+from docx import Document
 
-source_name = "my_source"
+source_name = "annual_report"  # matches script name, creates rag_content/annual_report/
 shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
 os.makedirs(f"rag_content/{source_name}")
 
-doc = Document("source_data/report.docx")
+doc = Document("source_data/annual_report.docx")
 for idx, para in enumerate(doc.paragraphs):
     if para.text.strip():
         with open(f"rag_content/{source_name}/chunk_{idx}.txt", "w") as f:
@@ -254,14 +313,16 @@ RAG files: `rag_content/{source_name}/*.txt` - plain text only, never `.md`. See
 
 When data needs both, ingest to DB first, then generate RAG from DB:
 
+**Naming convention:** `models/generate_rag_{source}.py` → folder `rag_content/{source}/`
+
 ```python
-# models/generate_rag.py - dbt.ref() creates dependency, runs after my_table
+# models/generate_rag_product_catalog.py - dbt.ref() creates dependency
 import os
 import shutil
 
 def model(dbt, session):
-    df = dbt.ref("my_table").df()
-    source_name = "my_source"
+    df = dbt.ref("load_product_catalog_items").df()
+    source_name = "product_catalog"
 
     # Idempotent: clear and recreate folder
     shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
