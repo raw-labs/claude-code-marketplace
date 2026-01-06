@@ -104,10 +104,25 @@ If the same source file was previously ingested:
 
 #### 1.1 Excel Analysis
 
-For Excel files, analyze per sheet:
+**Analyze each sheet independently** - sheets may have different content types and destinations.
+
+For each sheet:
 1. **Structure:** merged cells (>10% = complex), header location, data boundaries
-2. **Content:** column types, average text length, long-form text (>200 chars)
-3. **If unclear:** Use vision analysis. See [vision-analysis.md](references/vision-analysis.md).
+2. **Content type:** Determine where on the spectrum:
+
+| Content Type | Characteristics | Destination |
+|--------------|-----------------|-------------|
+| Structured (CSV-like) | Numbers, dates, short strings, categorical values | DB only |
+| Text-heavy | Long text in cells (>200 chars), descriptions, notes | RAG only |
+| Mixed | Structured fields + text content in same rows | Both |
+
+3. **Multi-entity columns:** Same data repeated for different entities
+4. **If unclear:** Use vision analysis. See [vision-analysis.md](references/vision-analysis.md).
+
+**Multi-entity pattern:** When columns repeat per entity (e.g., `Value_A`, `Value_B`, `Value_C`):
+- Identify the entity dimension
+- Map columns to entities
+- Denormalize: create one row per (record, entity) with entity-specific columns
 
 #### 1.2 Word Document Analysis
 
@@ -125,9 +140,9 @@ Process paragraph by paragraph, table by table. Track section context from headi
 | Paragraphs, narrative text | No → **RAG** | txt for semantic search |
 
 **Decision process:**
-1. **Database only:** Data will be queried (totals, filters, lookups by ID)
-2. **RAG only:** Data is for semantic search/context (descriptions, notes, analysis)
-3. **Both:** Need queries AND semantic search on same data
+1. **Database only:** Structured data for queries (filters, aggregations, joins)
+2. **RAG only:** Text content for semantic similarity search
+3. **Both:** Same data needs structured queries AND semantic search
 
 **Converting tables to RAG:** See [data-classification.md](references/data-classification.md#converting-tables-to-rag-text) for conversion examples.
 
@@ -192,32 +207,11 @@ For each NEW structured table:
 
 ### Phase 3: Extract & Generate Artifacts
 
-**Execute extraction strategy decided in Phase 1.5.**
+**Execute extraction strategy decided in Phase 1.4.**
 
 #### Code Extraction Path
 
-For clean, consistent content - write Python dbt models to extract:
-
-```python
-# models/load_report_tables.py
-import pandas as pd
-from docx import Document
-
-def model(dbt, session):
-    doc = Document('source_data/report.docx')
-
-    # Extract first well-structured table
-    table = doc.tables[0]
-    headers = [c.text.strip() for c in table.rows[0].cells]
-    data = [[c.text.strip() for c in r.cells] for r in table.rows[1:]]
-
-    df = pd.DataFrame(data, columns=headers)
-    df.columns = df.columns.str.lower().str.replace(' ', '_')
-    df['_rag_refs'] = None  # Populated later
-    return df
-```
-
-**Always use dbt models** - they provide schema validation, testing, and lineage tracking.
+For clean, consistent content - write Python dbt models (`models/load_*.py`). Always use dbt models for schema validation, testing, and lineage tracking.
 
 #### Manual Extraction Path
 
@@ -231,11 +225,11 @@ For complex content - agent reads, understands, and extracts step-by-step:
 
 #### Queryable Data → dbt Models
 
-Create `models/load_{source}_{sheet_or_table}.py`:
+Create one dbt model per sheet/table: `models/load_{source}_{sheet}.py`
+- Each sheet may have different destination (DB only, RAG only, or Both)
 - Read from `source_data/{filename}` (copy source files there first)
 - Clean column names: lowercase, underscores, alphanumeric only
-- Add `_rag_refs` column for bidirectional linking
-- For Word tables: use `doc.tables[index]`, extract headers from first row
+- Add `_rag_refs` column for bidirectional linking (if using Both)
 
 #### Update schema.yml (REQUIRED)
 
@@ -254,7 +248,28 @@ RAG files: `rag_content/*.txt` - plain text only, never `.md`. See [rag-format.m
 
 **Chunk size:** Small for standalone facts, medium for sections needing context, large for flowing narratives. Never split mid-sentence or separate tables from descriptions.
 
-See [rag-format.md](references/rag-format.md) for file format (SOURCE METADATA, DATABASE LINKS, CONTENT, KEYWORDS sections).
+#### Both DB + RAG (generate RAG from DB)
+
+**Why both?** Different retrieval needs:
+- **DB:** User knows criteria ("filter by category X", "sum amounts for Q1")
+- **RAG:** User describes semantically ("find content about performance issues")
+
+When data needs both, ingest to DB first, then generate RAG from DB:
+
+```python
+# models/generate_rag.py - runs AFTER data is in DB
+def model(dbt, session):
+    df = dbt.ref("my_table").df()
+
+    for entity in df["entity"].unique():
+        rows = df[df["entity"] == entity]
+        content = format_as_text(rows)  # Convert to readable text
+        write_file(f"rag_content/{entity}.txt", content)
+
+    return df  # Return unchanged for dbt lineage
+```
+
+Use simple RAG format (content only) when generating from DB - the DB is the source of truth.
 
 #### Update manifest.json
 
@@ -297,6 +312,8 @@ Generate 5-15 concrete questions:
 Compute expected values from source data before writing tests. Query pandas DataFrames for aggregations, scan RAG chunks for link verification.
 
 ### Phase 5: Tool Design & Implementation
+
+**Invoke mxcp-expert skill** for tool creation. Read `common-mistakes.md` first.
 
 #### 5.1 Design Principles
 
@@ -375,6 +392,15 @@ project/
 ```
 
 ## When to Ask User
+
+### Upfront Discovery (ask before analysis)
+
+- "What queries will you need?" (by ID, by category, aggregations, search)
+- "What metadata should be preserved?" (dates, status fields, notes)
+- "Should data be in DB only, RAG only, or both?"
+- "Are there entity-specific columns?" (per-country, per-version, per-department)
+
+### During Processing
 
 | Situation | Action |
 |-----------|--------|

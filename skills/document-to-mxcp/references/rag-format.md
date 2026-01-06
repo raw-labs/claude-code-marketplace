@@ -3,11 +3,23 @@
 ## File Requirements
 
 - **Extension:** `.txt` only (never `.md`)
-- **Location:** `rag_content/chunk_XXX.txt`
+- **Location:** `rag_content/*.txt`
 - **Content:** Plain text, no markdown formatting
 - **Whitespace:** Trim leading/trailing spaces, no excessive blank lines
 
-## RAG txt File Structure
+## When to Use Full vs Simple Format
+
+| Scenario | Format | manifest.json |
+|----------|--------|---------------|
+| RAG with DB cross-references | Full (with sections) | Required |
+| RAG-only, no DB | Simple (content only) | Optional |
+| Generated from DB | Simple (content only) | Optional |
+
+**Simple format:** Just the content as plain text. Use when no DB linkage needed.
+
+**Full format:** Use structured sections (below) when bidirectional RAG-DB links are needed.
+
+## RAG txt File Structure (Full Format)
 
 Every RAG chunk file must have these sections:
 

@@ -20,6 +20,7 @@ MXCP is an enterprise framework for building production-ready AI tools with SQL 
 ## Pre-Implementation Checklist
 
 Before writing ANY YAML or code:
+- [ ] Read [common-mistakes.md](references/common-mistakes.md) - saves 90% of debugging time
 - [ ] Read the relevant schema doc ([tool.md](references/schemas/tool.md), [resource.md](references/schemas/resource.md), or [prompt.md](references/schemas/prompt.md))
 - [ ] Check if MXCP already provides this feature (see Capabilities table)
 - [ ] Know the required fields and valid types
@@ -53,6 +54,7 @@ Before writing ANY YAML or code:
 
 | When implementing... | Read first |
 |---------------------|------------|
+| **Any YAML** | [common-mistakes.md](references/common-mistakes.md) |
 | Tools, Resources, Prompts | [tool.md](references/schemas/tool.md), [resource.md](references/schemas/resource.md), [prompt.md](references/schemas/prompt.md) |
 | Authentication/Authorization | [authentication.md](references/security/authentication.md), [policies.md](references/security/policies.md) |
 | Tests | [testing.md](references/quality/testing.md) |
