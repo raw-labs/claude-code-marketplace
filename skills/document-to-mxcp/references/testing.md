@@ -50,10 +50,47 @@ models:
         description: "JSON array of linked RAG chunk IDs"
 ```
 
+### Row Count Validation (Required)
+
+Always verify ingested data matches source row count:
+
+```python
+# In dbt model or separate validation script
+import pandas as pd
+
+# Count source rows
+source_df = pd.read_excel('source_data/sales_report.xlsx', sheet_name='Sales')
+expected_count = len(source_df)
+
+# After ingestion, verify count matches
+# Add as dbt test or assertion in model
+```
+
+Add row count test to schema.yml:
+
+```yaml
+models:
+  - name: load_sales_data
+    tests:
+      - dbt_utils.equal_rowcount:
+          compare_model: source('source_data', 'sales_report_sales')
+    # Or use a custom singular test:
+    # tests/assert_sales_data_count.sql
+```
+
+Or create a singular test `tests/assert_sales_data_count.sql`:
+
+```sql
+-- Returns rows if counts don't match (test fails if any rows returned)
+SELECT 'Row count mismatch' as error
+WHERE (SELECT COUNT(*) FROM {{ ref('load_sales_data') }}) != 150  -- expected count from source
+```
+
 ### Common dbt Tests
 
 | Test | Purpose | When to Use |
 |------|---------|-------------|
+| `row_count` | Matches source count | Every ingested table |
 | `not_null` | No NULL values | Primary keys, required fields |
 | `unique` | No duplicates | Primary keys, unique identifiers |
 | `relationships` | FK exists in other table | Foreign key columns |

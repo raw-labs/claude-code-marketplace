@@ -1,5 +1,12 @@
 # RAG Content Format
 
+## File Requirements
+
+- **Extension:** `.txt` only (never `.md`)
+- **Location:** `rag_content/chunk_XXX.txt`
+- **Content:** Plain text, no markdown formatting
+- **Whitespace:** Trim leading/trailing spaces, no excessive blank lines
+
 ## RAG txt File Structure
 
 Every RAG chunk file must have these sections:
@@ -184,3 +191,4 @@ for entity_id in [201, 202]:
 with open(manifest_path, 'w') as f:
     json.dump(manifest, f, indent=2)
 ```
+

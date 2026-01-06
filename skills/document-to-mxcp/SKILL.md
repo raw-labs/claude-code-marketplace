@@ -102,69 +102,18 @@ If the same source file was previously ingested:
 
 **Goal: Fully understand the file BEFORE any ingestion decisions.**
 
-#### 1.1 File Type Detection
-
-```python
-import os
-ext = os.path.splitext(filepath)[1].lower()
-if ext in ['.xlsx', '.xls', '.csv']:
-    file_type = 'excel'
-elif ext == '.docx':
-    file_type = 'word'
-elif ext == '.doc':
-    # Convert to .docx first
-    print("Converting .doc to .docx...")
-    # Use: libreoffice --headless --convert-to docx file.doc
-    file_type = 'word'
-```
-
-#### 1.2 Excel Analysis
+#### 1.1 Excel Analysis
 
 For Excel files, analyze per sheet:
 1. **Structure:** merged cells (>10% = complex), header location, data boundaries
 2. **Content:** column types, average text length, long-form text (>200 chars)
 3. **If unclear:** Use vision analysis. See [vision-analysis.md](references/vision-analysis.md).
 
-#### 1.3 Word Document Analysis
+#### 1.2 Word Document Analysis
 
-**Process paragraph by paragraph, table by table:**
+Process paragraph by paragraph, table by table. Track section context from headings. For each content block, classify and decide destination.
 
-```python
-from docx import Document
-
-doc = Document(filepath)
-content_blocks = []
-current_section = "Introduction"
-
-for para in doc.paragraphs:
-    # Track section context from headings
-    if para.style.name.startswith('Heading'):
-        current_section = para.text
-
-    content_blocks.append({
-        'type': 'paragraph',
-        'text': para.text,
-        'style': para.style.name,
-        'section': current_section
-    })
-
-for i, table in enumerate(doc.tables):
-    rows = []
-    for row in table.rows:
-        rows.append([cell.text for cell in row.cells])
-    content_blocks.append({
-        'type': 'table',
-        'index': i,
-        'data': rows,
-        'row_count': len(rows),
-        'col_count': len(rows[0]) if rows else 0,
-        'section': current_section
-    })
-```
-
-**For each content block, classify and decide destination.**
-
-#### 1.4 Classification: Database vs RAG vs Both
+#### 1.3 Classification: Database vs RAG vs Both
 
 **The key question is NOT "is this tabular?" but "will queries be needed?"**
 
@@ -187,7 +136,7 @@ for i, table in enumerate(doc.tables):
 - Table has mixed numeric + text columns
 - Same data might need both approaches
 
-#### 1.5 Extraction Strategy Decision
+#### 1.4 Extraction Strategy Decision
 
 **For each content block, decide: code extraction or manual step-by-step?**
 
@@ -211,17 +160,7 @@ Skip if project is empty or file has only RAG content (no database tables).
 
 #### 2.1 Primary Key Detection
 
-```python
-def detect_pk(df, table_name):
-    patterns = ['id', f'{table_name}_id', f'{table_name[:-1]}_id', 'key', 'code']
-    for p in patterns:
-        if p in df.columns and df[p].is_unique and df[p].notna().all():
-            return p
-    for col in df.columns:
-        if df[col].is_unique and df[col].notna().all():
-            return col
-    return None
-```
+Look for columns named `id`, `{table}_id`, `key`, `code` that are unique and non-null.
 
 #### 2.2 Relationship Detection
 
@@ -303,6 +242,7 @@ Create `models/load_{source}_{sheet_or_table}.py`:
 **Every model MUST have dbt tests.** See [testing.md](references/testing.md) for complete format.
 
 Minimum tests per model:
+- **Row count test** - verify ingested count matches source document
 - `not_null` + `unique` on primary key
 - `not_null` on required fields
 - `relationships` on foreign keys
@@ -310,30 +250,11 @@ Minimum tests per model:
 
 #### Unstructured Data → RAG txt
 
-**Choose chunk size based on content type and retrieval needs:**
+RAG files: `rag_content/*.txt` - plain text only, never `.md`. See [rag-format.md](references/rag-format.md).
 
-| Content Type | Chunk Size | Rationale |
-|--------------|------------|-----------|
-| Individual records with notes | **Small** (1-3 paragraphs) | Each record is self-contained, precise retrieval |
-| FAQ, definitions, discrete facts | **Small** | Stand-alone answers, high precision |
-| Topic sections, analysis | **Medium** (full section) | Context needed to understand meaning |
-| Tables with surrounding description | **Medium** | Table + context form semantic unit |
-| Narrative reports, policies | **Large** (multi-section) | Meaning requires broader context |
-| Legal text, contracts | **Large** | Clauses depend on surrounding text |
+**Chunk size:** Small for standalone facts, medium for sections needing context, large for flowing narratives. Never split mid-sentence or separate tables from descriptions.
 
-**Decision process:**
-1. Can this content answer a question without surrounding text? → Small chunk
-2. Does meaning depend on nearby paragraphs? → Include them (medium)
-3. Is this part of a flowing narrative or argument? → Large chunk, don't split mid-thought
-
-**Never create chunks that:**
-- Split a sentence or paragraph mid-way
-- Separate a table from its description/headers
-- Break a logical argument or explanation
-
-**RAG txt file format:** See [rag-format.md](references/rag-format.md) for complete format with examples.
-
-Required sections: SOURCE METADATA, DATABASE LINKS, CONTENT, KEYWORDS.
+See [rag-format.md](references/rag-format.md) for file format (SOURCE METADATA, DATABASE LINKS, CONTENT, KEYWORDS sections).
 
 #### Update manifest.json
 
@@ -373,21 +294,7 @@ Generate 5-15 concrete questions:
 
 #### 4.3 Compute Ground Truth
 
-**For data queries:**
-```python
-expected = df[df['customer_id'] == 101]['amount'].sum()
-```
-
-**For link queries:**
-```python
-# Ground truth: which chunks mention customer 101?
-expected_chunks = []
-for chunk_file in os.listdir('rag_content'):
-    if chunk_file.endswith('.txt'):
-        content = open(f'rag_content/{chunk_file}').read()
-        if 'customer 101' in content.lower() or 'IDs: [101' in content:
-            expected_chunks.append(chunk_file.replace('.txt', ''))
-```
+Compute expected values from source data before writing tests. Query pandas DataFrames for aggregations, scan RAG chunks for link verification.
 
 ### Phase 5: Tool Design & Implementation
 
@@ -402,19 +309,7 @@ Each tool must be:
 
 #### 5.2 Categorical Data Handling
 
-**Detect categorical columns** (≤20 unique values, string type). For each:
-
-1. Extract unique values: `df[col].dropna().unique().tolist()`
-2. Add `enum` to parameter schema: `enum: ["active", "inactive", "pending"]`
-3. List valid values in description: `"Status options: active, inactive, pending"`
-
-```yaml
-parameters:
-  - name: status
-    type: string
-    description: "Customer status. Valid values: active, inactive, pending"
-    enum: ["active", "inactive", "pending"]
-```
+For columns with ≤20 unique values: add `enum` to parameter schema and list valid values in description.
 
 #### 5.3 Tool Categories
 
@@ -473,7 +368,7 @@ project/
 ├── sql/
 │   └── *.sql
 ├── rag_content/
-│   ├── *.txt
+│   ├── *.txt                  # .txt only, never .md
 │   └── manifest.json
 └── data/
     └── db-default.duckdb
