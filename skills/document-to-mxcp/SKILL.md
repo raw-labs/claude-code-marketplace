@@ -45,11 +45,12 @@ uv pip install mxcp pandas openpyxl python-docx duckdb
 ## Core Principles
 
 1. **Analyze first, ingest second.** Fully understand the file before writing anything.
-2. **The project IS the state.** Discover existing state from `models/`, `tools/`, `rag_content/`.
-3. **Choose extraction strategy wisely.** Use code for clean structure, manual for complex content.
-4. **Value-driven tools.** Understand what information is valuable before creating tools.
-5. **Test-first validation.** Compute expected results from source before implementing tools.
-6. **Ask when uncertain.** If classification or linking is ambiguous, ask the user.
+2. **Generate reproducible pipelines.** Output is working scripts, not just ingested data. Scripts must be re-runnable from scratch to produce identical results.
+3. **Code-first extraction.** Always generate dbt models and scripts. Manual extraction is not reproducible.
+4. **The project IS the state.** Discover existing state from `models/`, `tools/`, `rag_content/`.
+5. **Value-driven tools.** Understand what information is valuable before creating tools.
+6. **Test-first validation.** Compute expected results from source before implementing tools.
+7. **Ask when uncertain.** If classification or linking is ambiguous, ask the user.
 
 ## Execution Pipeline
 
@@ -151,21 +152,17 @@ Process paragraph by paragraph, table by table. Track section context from headi
 - Table has mixed numeric + text columns
 - Same data might need both approaches
 
-#### 1.4 Extraction Strategy Decision
+#### 1.4 Extraction Strategy
 
-**For each content block, decide: code extraction or manual step-by-step?**
+**Always generate code** - dbt models and scripts that can be re-run.
 
-| Use Code Extraction | Use Manual Extraction |
-|---------------------|----------------------|
-| Clean tables (consistent columns) | Messy tables (merged cells, varying structure) |
-| Repeating structure patterns | Context-dependent content ("see above") |
-| Standard paragraph chunking | Complex narrative requiring understanding |
-| Predictable document template | Meaning needed to classify |
+| Content Type | Approach |
+|--------------|----------|
+| Clean tables | Direct pandas extraction |
+| Messy tables (merged cells) | Preprocessing script to normalize, then extract |
+| Complex structure | Multi-step pipeline: clean → transform → load |
 
 **For large documents (>50 pages):** Process section-by-section. See [extraction-strategy.md](references/extraction-strategy.md).
-
-**Code extraction:** Write Python dbt models to extract and load data programmatically.
-**Manual extraction:** Agent reads content, understands it, decides what to extract, writes results.
 
 **Document extraction strategy per section before proceeding.**
 
@@ -205,50 +202,51 @@ For each NEW structured table:
 
 **Document decisions before proceeding.**
 
-### Phase 3: Extract & Generate Artifacts
+### Phase 3: Generate Extraction Scripts
 
-**Execute extraction strategy decided in Phase 1.4.**
+**The deliverable is the PIPELINE, not just the data.** Generate dbt models and scripts that:
+- Can be re-run from scratch to reproduce identical results
+- Update output automatically when source files change
+- Are version-controlled alongside the project
 
-#### Code Extraction Path
+#### DB Only → dbt Models
 
-For clean, consistent content - write Python dbt models (`models/load_*.py`). Always use dbt models for schema validation, testing, and lineage tracking.
-
-#### Manual Extraction Path
-
-For complex content - agent reads, understands, and extracts step-by-step:
-
-1. Read section (10-20 pages)
-2. For each element: understand meaning, decide destination
-3. Extract with context (flatten merged cells, resolve references)
-4. Write to DB/RAG with proper metadata
-5. Track progress, move to next section
-
-#### Queryable Data → dbt Models
-
-Create one dbt model per sheet/table: `models/load_{source}_{sheet}.py`
-- Each sheet may have different destination (DB only, RAG only, or Both)
+For structured data that needs queries, create dbt models: `models/load_{source}_{sheet}.py`
 - Read from `source_data/{filename}` (copy source files there first)
 - Clean column names: lowercase, underscores, alphanumeric only
-- Add `_rag_refs` column for bidirectional linking (if using Both)
 
-#### Update schema.yml (REQUIRED)
+**Idempotency:** dbt models are inherently idempotent - re-running `mxcp dbt run` rebuilds tables from source.
 
-**Every model MUST have dbt tests.** See [testing.md](references/testing.md) for complete format.
+**schema.yml (REQUIRED):** Every model MUST have dbt tests. See [testing.md](references/testing.md).
 
-Minimum tests per model:
-- **Row count test** - verify ingested count matches source document
-- `not_null` + `unique` on primary key
-- `not_null` on required fields
-- `relationships` on foreign keys
-- `accepted_values` on categorical columns
+Minimum tests: row count, `not_null` + `unique` on PK, `relationships` on FKs, `accepted_values` on categoricals.
 
-#### Unstructured Data → RAG txt
+#### RAG Only → Extraction Script
 
-RAG files: `rag_content/*.txt` - plain text only, never `.md`. See [rag-format.md](references/rag-format.md).
+For text content that only needs semantic search (no DB queries), create a standalone script:
 
-**Chunk size:** Small for standalone facts, medium for sections needing context, large for flowing narratives. Never split mid-sentence or separate tables from descriptions.
+```python
+# scripts/extract_rag.py - run separately, not as dbt model
+import os
+import shutil
+from docx import Document  # or pandas for Excel
 
-#### Both DB + RAG (generate RAG from DB)
+source_name = "my_source"
+shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
+os.makedirs(f"rag_content/{source_name}")
+
+doc = Document("source_data/report.docx")
+for idx, para in enumerate(doc.paragraphs):
+    if para.text.strip():
+        with open(f"rag_content/{source_name}/chunk_{idx}.txt", "w") as f:
+            f.write(para.text)
+```
+
+RAG files: `rag_content/{source_name}/*.txt` - plain text only, never `.md`. See [rag-format.md](references/rag-format.md).
+
+**Chunk size:** Small for standalone facts, medium for sections needing context, large for flowing narratives. Never split mid-sentence.
+
+#### DB + RAG → dbt Model + RAG Generation
 
 **Why both?** Different retrieval needs:
 - **DB:** User knows criteria ("filter by category X", "sum amounts for Q1")
@@ -257,29 +255,36 @@ RAG files: `rag_content/*.txt` - plain text only, never `.md`. See [rag-format.m
 When data needs both, ingest to DB first, then generate RAG from DB:
 
 ```python
-# models/generate_rag.py - runs AFTER data is in DB
+# models/generate_rag.py - dbt.ref() creates dependency, runs after my_table
+import os
+import shutil
+
 def model(dbt, session):
     df = dbt.ref("my_table").df()
+    source_name = "my_source"
 
-    for entity in df["entity"].unique():
-        rows = df[df["entity"] == entity]
-        content = format_as_text(rows)  # Convert to readable text
-        write_file(f"rag_content/{entity}.txt", content)
+    # Idempotent: clear and recreate folder
+    shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
+    os.makedirs(f"rag_content/{source_name}")
 
-    return df  # Return unchanged for dbt lineage
+    for idx, row in df.iterrows():
+        # Format row data as narrative text
+        content = f"{row['name']}: {row['description']}"
+        with open(f"rag_content/{source_name}/chunk_{idx}.txt", "w") as f:
+            f.write(content)
+
+    return df
 ```
 
 Use simple RAG format (content only) when generating from DB - the DB is the source of truth.
+
+**Idempotency:** RAG generation scripts clear and recreate the target folder, ensuring re-runs produce identical results regardless of previous state.
 
 #### Update manifest.json
 
 See [rag-format.md](references/rag-format.md#manifestjson-structure) for full structure.
 
 Key fields: `chunks` (chunk metadata), `db_to_rag_index` (reverse lookup `{table}.{id}` → chunk IDs).
-
-#### Populate DB-side References
-
-After RAG chunks created, update `_rag_refs` column from manifest's `db_to_rag_index`.
 
 #### Validate
 ```bash
@@ -313,7 +318,7 @@ Compute expected values from source data before writing tests. Query pandas Data
 
 ### Phase 5: Tool Design & Implementation
 
-**Invoke mxcp-expert skill** for tool creation. Read `common-mistakes.md` first.
+**Invoke mxcp-expert skill** for tool creation.
 
 #### 5.1 Design Principles
 
@@ -377,15 +382,18 @@ project/
 ├── source_data/
 │   └── {original files}
 ├── models/
-│   ├── load_*.py
-│   ├── populate_rag_refs.py
+│   ├── load_*.py              # dbt models for DB ingestion
+│   ├── generate_rag_*.py      # dbt models for RAG from DB (if Both)
 │   └── schema.yml
+├── scripts/
+│   └── extract_rag_*.py       # standalone scripts for RAG-only content
 ├── tools/
 │   └── *.yml
 ├── sql/
 │   └── *.sql
 ├── rag_content/
-│   ├── *.txt                  # .txt only, never .md
+│   ├── {source_name}/         # nested folder per source file
+│   │   └── *.txt              # .txt only, never .md
 │   └── manifest.json
 └── data/
     └── db-default.duckdb

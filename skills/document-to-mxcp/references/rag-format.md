@@ -3,9 +3,21 @@
 ## File Requirements
 
 - **Extension:** `.txt` only (never `.md`)
-- **Location:** `rag_content/*.txt`
+- **Location:** `rag_content/{source_name}/*.txt` (nested by source file)
 - **Content:** Plain text, no markdown formatting
 - **Whitespace:** Trim leading/trailing spaces, no excessive blank lines
+
+Example structure:
+```
+rag_content/
+├── sales_report/
+│   ├── chunk_001.txt
+│   └── chunk_002.txt
+├── customer_data/
+│   ├── chunk_001.txt
+│   └── chunk_002.txt
+└── manifest.json
+```
 
 ## When to Use Full vs Simple Format
 
@@ -113,11 +125,10 @@ The manifest tracks all RAG chunks and enables reverse lookups from database to 
 ```json
 {
   "version": "1.0",
-  "source_file": "sales_report.docx",
   "created_at": "2024-01-15T10:30:00Z",
   "chunks": {
-    "chunk_001": {
-      "file": "chunk_001.txt",
+    "sales_report/chunk_001": {
+      "file": "sales_report/chunk_001.txt",
       "source": "sales_report.docx",
       "section": "Executive Summary",
       "page": "1-2",
@@ -126,8 +137,8 @@ The manifest tracks all RAG chunks and enables reverse lookups from database to 
       "link_type": "none",
       "keywords": ["executive summary", "overview"]
     },
-    "chunk_002": {
-      "file": "chunk_002.txt",
+    "sales_report/chunk_002": {
+      "file": "sales_report/chunk_002.txt",
       "source": "sales_report.docx",
       "section": "Customer Analysis",
       "page": "15-17",
@@ -136,8 +147,8 @@ The manifest tracks all RAG chunks and enables reverse lookups from database to 
       "link_type": "describes",
       "keywords": ["customer analysis", "sales performance"]
     },
-    "chunk_003": {
-      "file": "chunk_003.txt",
+    "sales_report/chunk_003": {
+      "file": "sales_report/chunk_003.txt",
       "source": "sales_report.docx",
       "section": "Customer Analysis",
       "page": "18-20",
@@ -148,8 +159,8 @@ The manifest tracks all RAG chunks and enables reverse lookups from database to 
     }
   },
   "db_to_rag_index": {
-    "customers.101": ["chunk_002", "chunk_003"],
-    "customers.102": ["chunk_002"]
+    "customers.101": ["sales_report/chunk_002", "sales_report/chunk_003"],
+    "customers.102": ["sales_report/chunk_002"]
   }
 }
 ```
@@ -181,8 +192,9 @@ if os.path.exists(manifest_path):
 else:
     manifest = {"version": "1.0", "chunks": {}, "db_to_rag_index": {}}
 
-# Add new chunk
-chunk_id = "chunk_004"
+# Add new chunk (with nested folder)
+source_name = "report"
+chunk_id = f"{source_name}/chunk_004"
 manifest["chunks"][chunk_id] = {
     "file": f"{chunk_id}.txt",
     "source": "report.docx",
