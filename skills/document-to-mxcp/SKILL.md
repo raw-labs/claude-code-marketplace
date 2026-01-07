@@ -65,7 +65,7 @@ ls models/*.py models/*.sql 2>/dev/null     # Existing dbt models
 cat models/schema.yml                         # Table schemas, relationships
 ls tools/*.yml 2>/dev/null                    # Existing tools
 ls scripts/*.py 2>/dev/null                   # Existing RAG extraction scripts
-ls rag_content/*/  2>/dev/null                # RAG content folders
+ls rag_content/*.txt 2>/dev/null              # RAG content files
 ```
 
 **Before proceeding, understand:**
@@ -243,11 +243,11 @@ Skip if project is empty or file has only RAG content.
 **All artifacts for a source file share the same folder name:**
 
 ```
-{source} = sanitized filename (e.g., sales_report_2024)
+{source} = sanitized filename (e.g., sales_report)
 
 models/{source}/          # dbt models for this source
 tools/{source}/           # tools for querying this source
-rag_content/{source}/     # RAG chunks from this source
+rag_content/{source}.txt  # single RAG file for this source
 scripts/{source}/         # standalone scripts (if RAG-only)
 ```
 
@@ -255,19 +255,13 @@ Example for `sales_report.xlsx`:
 ```
 models/sales_report/
 ├── load_orders.py        # → table: sales_report_orders
-├── load_products.py      # → table: sales_report_products
 └── generate_rag.py       # generates RAG from DB (if Both)
 
 tools/sales_report/
-├── get_order.yml
-└── search_products.yml
+└── get_sales_report_order.yml
 
-rag_content/sales_report/
-├── chunk_001.txt
-└── chunk_002.txt
+rag_content/sales_report.txt  # single file with sections
 ```
-
-This makes it easy to identify, update, or remove all artifacts for a source.
 
 #### DB Only → dbt Models
 
