@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "RAW Labs plugins for Claude Code including MXCP development tools",
-    "version": "1.0.7"
+    "version": "1.0.8"
   },
   "plugins": [
     {
