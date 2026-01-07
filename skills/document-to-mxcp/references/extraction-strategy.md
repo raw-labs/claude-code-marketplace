@@ -206,11 +206,7 @@ Agent generates:
    - Run code extraction for A and C
    - Process B with preprocessing script
 
-4. LINK: Review extracted content
-   - Identify cross-references
-   - Create RAG-DB links
-
-5. VALIDATE (code): Run tests
+4. VALIDATE (code): Run tests
 ```
 
 ## Large Document Workflow
@@ -248,9 +244,8 @@ For each major section:
   2. Decide: simple or complex extraction?
   3. Extract content
   4. Write to DB/RAG
-  5. Update manifest
-  6. Validate extraction
-  7. Move to next section
+  5. Validate extraction
+  6. Move to next section
 ```
 
 #### Step 3: Progress Tracking

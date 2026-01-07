@@ -1,6 +1,6 @@
 ---
 name: document-to-mxcp
-description: "Intelligent single-file document ingestion into MXCP servers. Supports Excel (.xlsx, .xls, .csv) and Word (.docx) files. Analyzes content to determine if queries will be needed (DuckDB) or semantic search (RAG txt), including converting tabular text to narrative format. Creates bidirectional references between RAG content and database entries. Use when: (1) Ingesting a document into an MXCP project, (2) Adding a new data file to an existing MXCP server, (3) Processing documents with mixed tables and text, (4) Preparing data for RAG systems with database linkage."
+description: "Intelligent single-file document ingestion into MXCP servers. Supports Excel (.xlsx, .xls, .csv) and Word (.docx) files. Analyzes content to determine if queries will be needed (DuckDB) or semantic search (RAG txt), including converting tabular text to narrative format. Use when: (1) Ingesting a document into an MXCP project, (2) Adding a new data file to an existing MXCP server, (3) Processing documents with mixed tables and text, (4) Preparing data for RAG or database systems."
 ---
 
 # Document to MXCP Ingestion
@@ -65,7 +65,7 @@ ls models/*.py models/*.sql 2>/dev/null     # Existing dbt models
 cat models/schema.yml                         # Table schemas, relationships
 ls tools/*.yml 2>/dev/null                    # Existing tools
 ls scripts/*.py 2>/dev/null                   # Existing RAG extraction scripts
-cat rag_content/manifest.json 2>/dev/null    # RAG content
+ls rag_content/*/  2>/dev/null                # RAG content folders
 ```
 
 **Before proceeding, understand:**
@@ -83,7 +83,7 @@ cat rag_content/manifest.json 2>/dev/null    # RAG content
 | Source files exist | `ls source_data/` vs models that reference them |
 | Schema changes | Compare source columns vs `schema.yml` |
 | Row counts | Query DB vs source file counts |
-| RAG coverage | `manifest.json` sources vs `source_data/` |
+| RAG coverage | `ls rag_content/` vs `source_data/` |
 
 #### Handling Changes
 
@@ -193,25 +193,12 @@ Detect FK columns by:
 - Naming patterns: `*_id`, `*_key`, `*_code`
 - Value matching: column values exist in another table's PK
 
-#### 2.3 RAG-DB Link Detection
-
-**Detection methods (in priority order):**
-1. **Explicit IDs:** Regex for "Customer 101", "Order #12345", "ID: ABC-123"
-2. **Entity names:** Match known names from DB against text
-3. **Section context:** Heading "Customer Analysis" + table "customers" → link
-4. **Semantic similarity:** Use embeddings only when explicit matching fails
-
-**Link types:** `describes` (explains entity), `summarizes` (aggregates), `references` (mentions), `contextualizes` (background)
-
-**When no clear link exists:** Don't force it. Many RAG chunks are standalone.
-
-#### 2.4 Integration Decisions
+#### 2.3 Integration Decisions
 
 For each NEW structured table:
 1. **Same entity exists?** → Create combined view or extend existing model
 2. **>70% column overlap?** → Merge candidate, align schemas
 3. **FK columns?** → Link to existing tables
-4. **Related RAG content?** → Update manifest with cross-references
 
 **When adding files to existing project:**
 - Review existing `models/`, `scripts/`, `tools/` before creating new ones
@@ -325,12 +312,6 @@ Use simple RAG format (content only) when generating from DB - the DB is the sou
 
 **Idempotency:** RAG generation scripts clear and recreate the target folder, ensuring re-runs produce identical results regardless of previous state.
 
-#### Update manifest.json
-
-See [rag-format.md](references/rag-format.md#manifestjson-structure) for full structure.
-
-Key fields: `chunks` (chunk metadata), `db_to_rag_index` (reverse lookup `{table}.{id}` → chunk IDs).
-
 #### Validate
 ```bash
 mxcp validate && mxcp dbt run && mxcp dbt test
@@ -348,14 +329,13 @@ mxcp validate && mxcp dbt run && mxcp dbt test
 2. **Users:** What role? What decisions?
 3. **Entities:** Primary entities and relationships
 4. **Metrics:** Totals, counts, trends, rankings
-5. **RAG-DB synergy:** What questions need both structured and unstructured data?
 
 #### 4.2 Question Generation
 
 Generate 5-15 concrete questions:
 - "What are the total sales for customer X?"
-- "Show me the analysis notes for customer X" (RAG lookup)
-- "Which customers have related documentation?"
+- "Which products have the highest revenue?"
+- "List all orders from last month"
 
 #### 4.3 Compute Ground Truth
 
@@ -397,7 +377,6 @@ For columns with ≤20 unique values: add `enum` to parameter schema and list va
 | Lookup | `get_{entity}_by_id` | `get_customer_by_id` |
 | Aggregation | `get_{entity}_{metric}` | `get_customer_sales` |
 | Search | `search_{entities}` | `search_orders` |
-| **RAG lookup** | `get_{entity}_docs` | `get_customer_docs` |
 
 #### 5.4 MXCP Tool Tests (REQUIRED)
 
@@ -426,7 +405,7 @@ mxcp validate && mxcp test      # Tool behavior
 Document:
 - File processed, classification decisions
 - Tables created with dbt test results (pass/fail)
-- RAG chunks created with link counts
+- RAG chunks created
 - Tools created with mxcp test results (pass/fail)
 - All tests must show PASS before declaring completion
 
@@ -453,9 +432,8 @@ project/
 ├── sql/
 │   └── *.sql
 ├── rag_content/
-│   ├── {source}/              # folder per source file
-│   │   └── *.txt              # .txt only, never .md
-│   └── manifest.json
+│   └── {source}/              # folder per source file
+│       └── *.txt              # .txt only, never .md
 └── data/
     └── db-default.duckdb
 ```

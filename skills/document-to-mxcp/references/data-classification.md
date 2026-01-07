@@ -65,8 +65,7 @@ Tabular data with descriptive text columns is often better suited for RAG (seman
 
 **Destination:**
 1. Numeric/queryable columns → DuckDB table
-2. Descriptive columns → RAG text files
-3. Bidirectional links between them
+2. Descriptive columns → RAG text files (generated from DB)
 
 ## Converting Tables to RAG Text
 

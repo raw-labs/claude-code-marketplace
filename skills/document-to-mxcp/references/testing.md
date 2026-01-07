@@ -46,8 +46,6 @@ models:
           - not_null
           - accepted_values:
               values: ['pending', 'completed', 'cancelled']
-      - name: _rag_refs
-        description: "JSON array of linked RAG chunk IDs"
 ```
 
 ### Row Count Validation (Required)
@@ -171,42 +169,6 @@ For each tool, include:
 2. **Edge cases** - Empty results, single result, boundary values
 3. **Multiple results** - If tool returns lists, test with various counts
 
-### RAG Cross-Reference Tool Tests
-
-```yaml
-mxcp: 1
-tool:
-  name: get_customer_docs
-  description: |
-    Get RAG document chunks related to a customer.
-    Returns chunk IDs containing notes or analysis about this customer.
-  parameters:
-    - name: customer_id
-      type: integer
-      required: true
-  return:
-    type: object
-    properties:
-      customer_id: {type: integer}
-      rag_chunks: {type: array, items: {type: string}}
-  source:
-    file: ../sql/get_customer_docs.sql
-  tests:
-    - name: customer_with_docs
-      arguments:
-        - {key: customer_id, value: 101}
-      result:
-        customer_id: 101
-        rag_chunks: ["chunk_001", "chunk_003", "chunk_007"]
-
-    - name: customer_no_docs
-      arguments:
-        - {key: customer_id, value: 999}
-      result:
-        customer_id: 999
-        rag_chunks: []
-```
-
 ### Running MXCP Tests
 
 ```bash
@@ -245,26 +207,6 @@ print(f"Customer 101: total={customer_101_sales}, count={customer_101_count}")
 # conn = duckdb.connect('data/db-default.duckdb')
 # result = conn.execute("SELECT SUM(amount) FROM sales WHERE customer_id = 101")
 # This defeats the purpose - you're not testing extraction correctness!
-```
-
-### For RAG Link Tests
-
-```python
-import os
-import json
-
-# Load manifest
-with open('rag_content/manifest.json') as f:
-    manifest = json.load(f)
-
-# Find chunks linked to customer 101
-customer_chunks = []
-for chunk_id, meta in manifest.get('chunks', {}).items():
-    if 101 in meta.get('linked_ids', []):
-        customer_chunks.append(chunk_id)
-
-print(f"Customer 101 chunks: {customer_chunks}")
-# Use this exact list in test result
 ```
 
 ### For Categorical Values
