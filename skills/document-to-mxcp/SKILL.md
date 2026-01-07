@@ -74,25 +74,15 @@ ls rag_content/*/  2>/dev/null                # RAG content folders
 - Will the new file's data overlap with existing data?
 - Should new data extend existing models or stay separate?
 
-#### State Tracking
+#### State Tracking & Changes
 
-**The project tracks ingestion state through its artifacts.** Before any ingestion, compare:
+**The project IS the state.** Check `source_data/`, `models/`, `rag_content/` before ingestion.
 
-| Check | How |
-|-------|-----|
-| Source files exist | `ls source_data/` vs models that reference them |
-| Schema changes | Compare source columns vs `schema.yml` |
-| Row counts | Query DB vs source file counts |
-| RAG coverage | `ls rag_content/` vs `source_data/` |
-
-#### Handling Changes
-
-| Change Type | Action |
-|-------------|--------|
-| Updated file | Compare columns, update model, re-run (idempotent) |
-| Deleted file | **Ask user:** keep artifacts or remove all? |
-| New version alongside old | Separate models + combined view if needed |
-| Duplicates detected | **Ask user:** skip, update, or version? |
+| Change | Action |
+|--------|--------|
+| Updated file | Re-run model (idempotent) |
+| Deleted file | Ask user: keep or remove artifacts? |
+| Schema conflict | Ask user: rename or migrate? |
 
 ### Phase 1: Deep Document Analysis
 
@@ -142,7 +132,34 @@ Process paragraph by paragraph, table by table. Track section context from headi
 - Include with related RAG chunks as context
 - Or store in DB as metadata linked to the data they describe
 
-#### 1.3 Classification: Database vs RAG vs Both
+#### 1.3 Image Analysis
+
+**Documents may contain images with valuable information.** Extract and analyze to avoid losing context.
+
+| Image Type | Action |
+|------------|--------|
+| Charts/graphs | Extract → vision describe → RAG |
+| Diagrams | Extract → vision describe → RAG |
+| Tables as images | Extract → vision OCR → RAG or DB |
+| Screenshots | Evaluate, extract if informational |
+| Logos, decorative | Skip |
+
+**Process:** Extract images (python-docx for Word, openpyxl for Excel) → Vision classify informational vs decorative → Generate descriptions → Create RAG chunks.
+
+**Vision prompt:** "Describe this chart/diagram: type, key data points, trends, labels, main insight."
+
+**RAG chunk format:**
+```
+=== SOURCE ===
+File: quarterly_report.docx
+Section: Sales Analysis
+Type: Bar chart
+
+=== CONTENT ===
+Bar chart showing Q1-Q4 revenue by region. North America leads at $2.3M...
+```
+
+#### 1.4 Classification: Database vs RAG vs Both
 
 **The key question is NOT "is this tabular?" but "will queries be needed?"**
 
@@ -152,11 +169,29 @@ Process paragraph by paragraph, table by table. Track section context from headi
 | Tables with descriptive text columns | No → **RAG** | Convert to narrative text |
 | Tables that need both query AND search | Both → **Database + RAG** | Store in DB, also generate RAG text |
 | Paragraphs, narrative text | No → **RAG** | txt for semantic search |
+| **Text with numbered sections** | Both → **Database + RAG** | Section index in DB, content in RAG |
+
+**Structured Text Patterns → Both DB + RAG:**
+
+Text that appears unstructured may have queryable structure. Look for:
+
+| Pattern | Example | DB Schema | Query Example |
+|---------|---------|-----------|---------------|
+| Numbered sections | "1.1 Overview", "2.3.1 Requirements" | `section_id`, `parent_id`, `title`, `content` | "What does section 1.1 say?" |
+| Named clauses | "Article 5: Termination" | `clause_id`, `title`, `content` | "Show Article 5" |
+| Definitions | "Term: Definition..." | `term`, `definition` | "Define X" |
+| Q&A / FAQ | "Q: ... A: ..." | `question`, `answer` | "What is the answer to X?" |
+
+**For numbered sections:**
+- Extract hierarchy: `1` is parent of `1.1`, `1.2`
+- Store in DB: `section_id`, `parent_section_id`, `section_number`, `title`, `level`
+- Store content in RAG with section reference
+- Enables: "Get section 1.1" (DB lookup) + "Find sections about security" (RAG search)
 
 **Decision process:**
-1. **Database only:** Structured data for queries (filters, aggregations, joins)
-2. **RAG only:** Text content for semantic similarity search
-3. **Both:** Same data needs structured queries AND semantic search
+1. **Database only:** Pure structured data (numbers, dates, categories)
+2. **RAG only:** Narrative text with no queryable identifiers
+3. **Both:** Text with queryable structure (sections, clauses, terms, IDs)
 
 **Converting tables to RAG:** See [data-classification.md](references/data-classification.md#converting-tables-to-rag-text) for conversion examples.
 
@@ -165,7 +200,7 @@ Process paragraph by paragraph, table by table. Track section context from headi
 - Table has mixed numeric + text columns
 - Same data might need both approaches
 
-#### 1.4 Extraction Strategy
+#### 1.5 Extraction Strategy
 
 **Always generate code** - dbt models and scripts that can be re-run.
 
@@ -181,24 +216,13 @@ Process paragraph by paragraph, table by table. Track section context from headi
 
 ### Phase 2: Integration Analysis
 
-Skip if project is empty or file has only RAG content (no database tables).
+Skip if project is empty or file has only RAG content.
 
-#### 2.1 Primary Key Detection
+**Detect keys and relationships:**
+- PK: columns named `id`, `{table}_id`, `key`, `code` that are unique
+- FK: `*_id` patterns, values matching another table's PK
 
-Look for columns named `id`, `{table}_id`, `key`, `code` that are unique and non-null.
-
-#### 2.2 Relationship Detection
-
-Detect FK columns by:
-- Naming patterns: `*_id`, `*_key`, `*_code`
-- Value matching: column values exist in another table's PK
-
-#### 2.3 Integration Decisions
-
-For each NEW structured table:
-1. **Same entity exists?** → Create combined view or extend existing model
-2. **>70% column overlap?** → Merge candidate, align schemas
-3. **FK columns?** → Link to existing tables
+**For each NEW table:** Same entity exists? → extend or create combined view. FK columns? → link to existing tables.
 
 **When adding files to existing project:**
 - Review existing `models/`, `scripts/`, `tools/` before creating new ones
@@ -365,18 +389,36 @@ Each tool must be:
 3. **Categorical values documented** - Enum values listed in description and schema
 4. **Focused** - One tool = one question type
 5. **Predictable** - Same inputs → same outputs
+6. **Domain-specific naming** - Include source/topic in name and description
 
-#### 5.2 Categorical Data Handling
+#### 5.2 Domain-Specific Tool Naming
+
+**Critical:** Multiple files may have identical structure but different topics. Tools must be distinguishable by the LLM consuming them.
+
+| ❌ Generic (ambiguous) | ✅ Domain-specific (clear) |
+|------------------------|---------------------------|
+| `get_section` | `get_compliance_policy_section` |
+| `search_content` | `search_hr_handbook` |
+| `get_definition` | `get_legal_term_definition` |
+
+**Tool naming pattern:** `{action}_{source}_{entity}`
+- `get_sales_report_section`
+- `search_employee_handbook`
+- `get_compliance_policy_by_id`
+
+**Description must state the source:**
+```yaml
+description: |
+  Get a section from the Sales Report 2024 by section number.
+  Use this for sales data, revenue analysis, and quarterly metrics.
+  NOT for HR policies or compliance documents.
+```
+
+**When multiple similar files exist:** Make descriptions mutually exclusive so LLM knows exactly which tool handles which domain.
+
+#### 5.3 Categorical Data Handling
 
 For columns with ≤20 unique values: add `enum` to parameter schema and list valid values in description.
-
-#### 5.3 Tool Categories
-
-| Question Type | Pattern | Example |
-|--------------|---------|---------|
-| Lookup | `get_{entity}_by_id` | `get_customer_by_id` |
-| Aggregation | `get_{entity}_{metric}` | `get_customer_sales` |
-| Search | `search_{entities}` | `search_orders` |
 
 #### 5.4 MXCP Tool Tests (REQUIRED)
 
@@ -442,22 +484,13 @@ project/
 
 ## When to Ask User
 
-### Upfront Discovery (ask before analysis)
-
-- "What queries will you need?" (by ID, by category, aggregations, search)
-- "What metadata should be preserved?" (dates, status fields, notes)
-- "Should data be in DB only, RAG only, or both?"
-- "Are there entity-specific columns?" (per-country, per-version, per-department)
-
-### During Processing
-
-| Situation | Action |
-|-----------|--------|
-| Unclear if queries needed | Ask: "Will you need to run queries on this data, or just search it?" |
-| Re-ingesting same file | Ask: "Replace, append, or merge?" |
-| Ambiguous entity linking | Ask: "Does this text relate to [entity]?" |
-| Schema conflict with existing | Ask: "Rename new table or migrate existing?" |
-| Large document (>50 pages) | Inform: "Processing in sections, may take time" |
+| Situation | Ask |
+|-----------|-----|
+| Before analysis | "What queries will you need? DB only, RAG only, or both?" |
+| Unclear destination | "Will you need to run queries on this data, or just search it?" |
+| Re-ingesting same file | "Replace, append, or merge?" |
+| Schema conflict | "Rename new table or migrate existing?" |
+| Large document (>50 pages) | Inform: "Processing in sections" |
 
 ## Error Handling
 
