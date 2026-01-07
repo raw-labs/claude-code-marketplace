@@ -78,41 +78,21 @@ cat rag_content/manifest.json 2>/dev/null    # RAG content
 
 **The project tracks ingestion state through its artifacts.** Before any ingestion, compare:
 
-| Check | How | Action if Mismatch |
-|-------|-----|-------------------|
-| Source files exist | `ls source_data/` vs models that reference them | Warn: "Model X references missing file Y" |
-| Schema changes | Compare source columns vs `schema.yml` | Detect added/removed columns |
-| Row counts | Query DB vs source file counts | Detect data changes |
-| RAG coverage | `manifest.json` sources vs `source_data/` | Detect orphaned chunks |
-
-```bash
-# Quick state check
-ls source_data/                              # What files exist
-mxcp query "SELECT name FROM sqlite_master WHERE type='table'"  # What tables exist
-cat rag_content/manifest.json | grep '"source"' | sort -u       # What RAG sources exist
-```
+| Check | How |
+|-------|-----|
+| Source files exist | `ls source_data/` vs models that reference them |
+| Schema changes | Compare source columns vs `schema.yml` |
+| Row counts | Query DB vs source file counts |
+| RAG coverage | `manifest.json` sources vs `source_data/` |
 
 #### Handling Changes
 
-**Updated file (same name, different content):**
-1. Compare columns: source file vs existing model's schema
-2. If columns added: Update model to include new columns, backfill nulls if needed
-3. If columns removed: **Ask user** - drop column or keep with nulls?
-4. If rows changed: Re-run model (idempotent - rebuilds from source)
-5. Regenerate dependent RAG content
-
-**Deleted source file:**
-1. **Ask user:** "Source file X was deleted. Should I: (a) Keep existing tables/RAG, (b) Remove all artifacts from this source?"
-2. If remove: Delete model, drop table, remove RAG folder, update manifest
-
-**New version alongside old (e.g., `report_2023.xlsx` + `report_2024.xlsx`):**
-1. Create separate models per file: `load_report_2023_*`, `load_report_2024_*`
-2. Create combined view if needed: `models/combined_report.sql`
-3. Update tools to query combined view
-
-**Duplicate detection:**
-- Before ingestion, check if same data exists: `SELECT COUNT(*) FROM existing WHERE key IN (new_keys)`
-- If duplicates found: **Ask user** - skip duplicates, update existing, or create versioned records?
+| Change Type | Action |
+|-------------|--------|
+| Updated file | Compare columns, update model, re-run (idempotent) |
+| Deleted file | **Ask user:** keep artifacts or remove all? |
+| New version alongside old | Separate models + combined view if needed |
+| Duplicates detected | **Ask user:** skip, update, or version? |
 
 ### Phase 1: Deep Document Analysis
 
@@ -140,9 +120,27 @@ For each sheet:
 - Map columns to entities
 - Denormalize: create one row per (record, entity) with entity-specific columns
 
+**Hierarchical structure:** Merged header cells with sub-headers underneath:
+- Flatten hierarchy: combine parent + child headers (e.g., "Q1 Revenue" from merged "Q1" + "Revenue")
+- Preserve hierarchy in column names or as separate dimension
+
+**Transposed tables:** Headers in rows instead of columns:
+- Detect by checking if first column contains field names and other columns contain instances
+- Transpose before extraction: `df = df.T` or pivot appropriately
+
+**Explanatory content (NEVER lose this):**
+- Cells or paragraphs explaining what data means → include as metadata or RAG
+- If structured data: add as column (e.g., `_description`) or separate lookup table
+- If RAG: include as context in the chunk
+- **Rule:** Every explanatory paragraph must appear somewhere in output
+
 #### 1.2 Word Document Analysis
 
 Process paragraph by paragraph, table by table. Track section context from headings. For each content block, classify and decide destination.
+
+**Explanatory paragraphs:** Paragraphs describing tables or sections must NOT be discarded:
+- Include with related RAG chunks as context
+- Or store in DB as metadata linked to the data they describe
 
 #### 1.3 Classification: Database vs RAG vs Both
 
