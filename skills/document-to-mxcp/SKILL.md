@@ -283,58 +283,59 @@ This makes it easy to identify, update, or remove all artifacts for a source.
 
 Minimum tests: row count, `not_null` + `unique` on PK, `relationships` on FKs, `accepted_values` on categoricals.
 
-#### RAG Only → Extraction Script
+#### RAG Only → Single File Extraction
 
-For text content that only needs semantic search (no DB queries):
+**One source file = one RAG file.** Generate a clean, structured document:
 
 ```python
 # scripts/annual_report/extract_rag.py
 import os
-import shutil
 from docx import Document
 
-source_name = "annual_report"  # must match folder name
-shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
-os.makedirs(f"rag_content/{source_name}")
+source_name = "annual_report"
+os.makedirs("rag_content", exist_ok=True)
 
 doc = Document("source_data/annual_report.docx")
-for idx, para in enumerate(doc.paragraphs):
-    if para.text.strip():
-        with open(f"rag_content/{source_name}/chunk_{idx}.txt", "w") as f:
-            f.write(para.text)
+sections = []
+current_section = None
+
+for para in doc.paragraphs:
+    if para.style.name.startswith('Heading'):
+        if current_section:
+            sections.append(current_section)
+        current_section = {'title': para.text, 'content': []}
+    elif para.text.strip() and current_section:
+        current_section['content'].append(para.text)
+
+if current_section:
+    sections.append(current_section)
+
+with open(f"rag_content/{source_name}.txt", "w") as f:
+    for section in sections:
+        f.write(f"## {section['title']}\n\n")
+        f.write("\n\n".join(section['content']))
+        f.write("\n\n")
 ```
 
-RAG files: plain text only, never `.md`. See [rag-format.md](references/rag-format.md).
+**Output format:** See [rag-format.md](references/rag-format.md).
 
-**Chunk size:** Small for standalone facts, medium for sections needing context, large for narratives. Never split mid-sentence.
-
-#### DB + RAG → dbt Model + RAG Generation
-
-**Why both?** DB for structured queries, RAG for semantic search on same data.
+#### DB + RAG → Single RAG File from DB
 
 ```python
-# models/product_catalog/generate_rag.py - dbt.ref() creates dependency
+# models/product_catalog/generate_rag.py
 import os
-import shutil
 
 def model(dbt, session):
     df = dbt.ref("product_catalog_items").df()
-    source_name = "product_catalog"  # must match folder name
+    os.makedirs("rag_content", exist_ok=True)
 
-    shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
-    os.makedirs(f"rag_content/{source_name}")
-
-    for idx, row in df.iterrows():
-        content = f"{row['name']}: {row['description']}"
-        with open(f"rag_content/{source_name}/chunk_{idx}.txt", "w") as f:
-            f.write(content)
-
+    with open("rag_content/product_catalog.txt", "w") as f:
+        for _, row in df.iterrows():
+            f.write(f"## {row['name']}\n\n{row['description']}\n\n")
     return df
 ```
 
-Use simple RAG format (content only) when generating from DB - the DB is the source of truth.
-
-**Idempotency:** RAG generation scripts clear and recreate the target folder, ensuring re-runs produce identical results regardless of previous state.
+**Idempotency:** RAG scripts overwrite the file completely - re-runs produce identical output.
 
 #### Validate
 ```bash
@@ -474,13 +475,12 @@ project/
 ├── sql/
 │   └── *.sql
 ├── rag_content/
-│   └── {source}/              # folder per source file
-│       └── *.txt              # .txt only, never .md
+│   └── {source}.txt           # one file per source, .txt only
 └── data/
     └── db-default.duckdb
 ```
 
-**Consistency rule:** `{source}` folder name must match across `models/`, `tools/`, `scripts/`, and `rag_content/`.
+**Consistency rule:** `{source}` name must match across `models/`, `tools/`, `scripts/`, and `rag_content/{source}.txt`.
 
 ## When to Ask User
 

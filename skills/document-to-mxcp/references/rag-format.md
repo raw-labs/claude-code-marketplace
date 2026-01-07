@@ -1,119 +1,129 @@
 # RAG Content Format
 
-## File Requirements
+## File Structure
 
-- **Extension:** `.txt` only (never `.md`)
-- **Location:** `rag_content/{source_name}/*.txt` (nested by source file)
-- **Content:** Plain text, no markdown formatting
-- **Whitespace:** Trim leading/trailing spaces, no excessive blank lines
+**One source file = one RAG file.** Simple, clean mapping.
 
-Example structure:
 ```
 rag_content/
-├── sales_report/
-│   ├── chunk_001.txt
-│   └── chunk_002.txt
-└── customer_data/
-    ├── chunk_001.txt
-    └── chunk_002.txt
+├── sales_report.txt
+├── employee_handbook.txt
+└── compliance_policy.txt
 ```
 
-## RAG Chunk Format
+## File Requirements
 
-RAG chunks are plain text files containing the content to be embedded and retrieved.
+- **Extension:** `.txt` only
+- **Location:** `rag_content/{source_name}.txt`
+- **Naming:** Match source filename (sanitized)
 
-### Simple Format (Recommended)
+## Document Format
 
-Just the content as plain text:
-
-```
-The market saw significant growth in Q4 2024, driven by
-increased consumer spending and favorable economic conditions.
-Key trends include digital transformation and sustainability initiatives.
-```
-
-Use simple format for:
-- Content generated from database tables
-- Standalone text that doesn't need source tracking
-- Most ingestion scenarios
-
-### With Source Metadata (Optional)
-
-Add source tracking when debugging origin is important:
+Structure content with sections and paragraphs for clean retrieval:
 
 ```
-=== SOURCE ===
-File: annual_report.docx
-Section: Market Overview
-Page: 5-7
+## Section Title
 
-=== CONTENT ===
-The market saw significant growth in Q4 2024, driven by
-increased consumer spending and favorable economic conditions.
-Key trends include digital transformation and sustainability initiatives.
+Paragraph content here. Multiple sentences grouped logically.
+
+Another paragraph in the same section.
+
+## Next Section
+
+Content continues with clear separation between topics.
 ```
 
-## Chunk Size Guidelines
+### Format Rules
 
-| Content Type | Chunk Size | Rationale |
-|--------------|------------|-----------|
-| Individual records, FAQ, definitions | **Small** (1-3 paragraphs) | Self-contained, precise retrieval |
-| Topic sections, analysis with context | **Medium** (full section) | Context needed for meaning |
-| Narrative reports, policies, legal text | **Large** (multi-section) | Flowing argument, don't split |
+1. **Section headers:** `## Title` (two hashes + space)
+2. **Paragraphs:** Separated by blank lines
+3. **No markdown beyond headers:** Plain text content
+4. **Preserve hierarchy:** Main sections, subsections if needed
 
-**Rules:**
-- Never split mid-sentence or mid-paragraph
-- Never separate a table from its description
-- Include enough context for the chunk to be understandable standalone
+### Example: Document with Numbered Sections
 
-## Creating RAG Chunks
+```
+## 1. Introduction
 
-### From Documents (RAG-only)
+This document outlines the compliance requirements for all employees.
+
+## 1.1 Scope
+
+These policies apply to all full-time and contract employees.
+
+## 1.2 Effective Date
+
+Policies are effective as of January 1, 2024.
+
+## 2. Data Handling
+
+All customer data must be handled according to privacy regulations.
+```
+
+### Example: Product Catalog
+
+```
+## Laptop Pro X1
+
+High-performance laptop with 16GB RAM and 512GB SSD.
+Ideal for developers and power users.
+
+## Wireless Mouse M200
+
+Ergonomic wireless mouse with 6-month battery life.
+Compatible with Windows and macOS.
+```
+
+## Creating RAG Files
+
+### From Documents
 
 ```python
-# scripts/annual_report/extract_rag.py
+# scripts/report/extract_rag.py
 import os
-import shutil
 from docx import Document
 
-source_name = "annual_report"
-shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
-os.makedirs(f"rag_content/{source_name}")
+source_name = "report"
+os.makedirs("rag_content", exist_ok=True)
 
-doc = Document("source_data/annual_report.docx")
-for idx, para in enumerate(doc.paragraphs):
-    if para.text.strip():
-        with open(f"rag_content/{source_name}/chunk_{idx:03d}.txt", "w") as f:
-            f.write(para.text)
+doc = Document("source_data/report.docx")
+sections = []
+current = {'title': 'Introduction', 'content': []}
+
+for para in doc.paragraphs:
+    if para.style.name.startswith('Heading'):
+        if current['content']:
+            sections.append(current)
+        current = {'title': para.text, 'content': []}
+    elif para.text.strip():
+        current['content'].append(para.text)
+
+if current['content']:
+    sections.append(current)
+
+with open(f"rag_content/{source_name}.txt", "w") as f:
+    for s in sections:
+        f.write(f"## {s['title']}\n\n")
+        f.write("\n\n".join(s['content']))
+        f.write("\n\n")
 ```
 
-### From Database (DB + RAG)
+### From Database
 
 ```python
-# models/product_catalog/generate_rag.py
+# models/catalog/generate_rag.py
 import os
-import shutil
 
 def model(dbt, session):
-    df = dbt.ref("product_catalog_items").df()
-    source_name = "product_catalog"
+    df = dbt.ref("catalog_items").df()
+    os.makedirs("rag_content", exist_ok=True)
 
-    shutil.rmtree(f"rag_content/{source_name}", ignore_errors=True)
-    os.makedirs(f"rag_content/{source_name}")
-
-    for idx, row in df.iterrows():
-        content = f"{row['name']}: {row['description']}"
-        with open(f"rag_content/{source_name}/chunk_{idx:03d}.txt", "w") as f:
-            f.write(content)
-
+    with open("rag_content/catalog.txt", "w") as f:
+        for _, row in df.iterrows():
+            f.write(f"## {row['name']}\n\n{row['description']}\n\n")
     return df
 ```
 
 ## Idempotency
 
-RAG extraction scripts should be idempotent:
-1. Clear the target folder before writing
-2. Regenerate all chunks from source
-3. Re-running produces identical results
-
-This ensures the RAG content stays in sync with source files or database.
+Scripts overwrite the target file completely. Re-running produces identical output.
